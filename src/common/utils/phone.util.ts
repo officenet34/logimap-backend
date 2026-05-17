@@ -3,9 +3,12 @@ export function normalizePhone(input: string): string {
   const trimmed = input.trim();
   let digits = trimmed.replace(/\D/g, '');
 
-  // +900532… (hatalı birleşim) → 90532…
+  // +900532… / +900000… (hatalı birleşim: 90 + 0 + 10 hane) → 90532…
   if (digits.startsWith('900') && digits.length === 13) {
     digits = `90${digits.substring(3)}`;
+  }
+  if (digits.startsWith('900') && digits.length === 12) {
+    digits = `90${digits.substring(2)}`;
   }
 
   if (digits.startsWith('0') && digits.length === 11) {
