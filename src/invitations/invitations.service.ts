@@ -1,0 +1,131 @@
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import {
+  InvitationStatus,
+  OrganizationMemberRole,
+  RegistrationAccountType,
+} from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { normalizePhone } from '../common/utils/phone.util';
+
+@Injectable()
+export class InvitationsService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async listPending(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException();
+
+    return this.prisma.organizationInvitation.findMany({
+      where: {
+        status: InvitationStatus.pending,
+        expiresAt: { gt: new Date() },
+        OR: [
+          { targetUserId: userId },
+          { targetPhone: user.phone },
+          user.email ? { targetEmail: user.email } : undefined,
+        ].filter(Boolean) as object[],
+      },
+      include: {
+        organization: {
+          select: { id: true, displayName: true, orgType: true, logoUrl: true },
+        },
+        invitedBy: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async accept(userId: string, inviteCode: string) {
+    const invitation = await this.findInvitationForUser(userId, inviteCode);
+
+    if (invitation.status !== InvitationStatus.pending) {
+      throw new BadRequestException('Davet artık geçerli değil');
+    }
+    if (invitation.expiresAt < new Date()) {
+      await this.prisma.organizationInvitation.update({
+        where: { id: invitation.id },
+        data: { status: InvitationStatus.expired },
+      });
+      throw new BadRequestException('Davet süresi dolmuş');
+    }
+
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    if (user.registrationType !== RegistrationAccountType.driver) {
+      throw new BadRequestException('Yalnızca şoför hesabı daveti kabul edebilir');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const existing = await tx.organizationMember.findFirst({
+        where: {
+          organizationId: invitation.organizationId,
+          userId,
+          memberRole: OrganizationMemberRole.driver,
+        },
+      });
+
+      if (!existing) {
+        await tx.organizationMember.create({
+          data: {
+            organizationId: invitation.organizationId,
+            userId,
+            memberRole: OrganizationMemberRole.driver,
+            status: InvitationStatus.accepted,
+            invitedByUserId: invitation.invitedByUserId,
+            joinedAt: new Date(),
+          },
+        });
+      }
+
+      await tx.organizationInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          status: InvitationStatus.accepted,
+          targetUserId: userId,
+          respondedAt: new Date(),
+        },
+      });
+    });
+
+    return { success: true, organizationId: invitation.organizationId };
+  }
+
+  async reject(userId: string, inviteCode: string) {
+    const invitation = await this.findInvitationForUser(userId, inviteCode);
+
+    await this.prisma.organizationInvitation.update({
+      where: { id: invitation.id },
+      data: {
+        status: InvitationStatus.rejected,
+        respondedAt: new Date(),
+      },
+    });
+
+    return { success: true };
+  }
+
+  private async findInvitationForUser(userId: string, inviteCode: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+
+    const invitation = await this.prisma.organizationInvitation.findUnique({
+      where: { inviteCode },
+    });
+
+    if (!invitation) throw new NotFoundException('Davet bulunamadı');
+
+    const matches =
+      invitation.targetUserId === userId ||
+      invitation.targetPhone === user.phone ||
+      (user.email && invitation.targetEmail === user.email);
+
+    if (!matches) throw new ForbiddenException('Bu davet size ait değil');
+
+    return invitation;
+  }
+}

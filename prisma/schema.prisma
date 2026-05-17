@@ -1,0 +1,278 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RegistrationAccountType {
+  sole_proprietor
+  company
+  driver
+
+  @@map("registration_account_type")
+}
+
+enum OrganizationType {
+  sole_proprietor
+  company
+
+  @@map("organization_type")
+}
+
+enum GenderType {
+  male
+  female
+
+  @@map("gender_type")
+}
+
+enum OrganizationMemberRole {
+  owner
+  manager
+  driver
+
+  @@map("organization_member_role")
+}
+
+enum InvitationStatus {
+  pending
+  accepted
+  rejected
+  cancelled
+  expired
+
+  @@map("invitation_status")
+}
+
+enum SectorCode {
+  transport_services
+  home_moving
+  cargo
+
+  @@map("sector_code")
+}
+
+model User {
+  id               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  registrationType RegistrationAccountType @map("registration_type")
+  email            String?                 @db.Citext
+  phone            String
+  passwordHash     String                  @map("password_hash")
+  firstName        String                  @map("first_name")
+  lastName         String                  @map("last_name")
+  gender           GenderType?
+  nationalId       String?                 @map("national_id")
+  profileImageUrl  String?                 @map("profile_image_url")
+  emailVerifiedAt  DateTime?               @map("email_verified_at") @db.Timestamptz(6)
+  phoneVerifiedAt  DateTime?               @map("phone_verified_at") @db.Timestamptz(6)
+  isActive         Boolean                 @default(true) @map("is_active")
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  driverProfile            DriverProfile?
+  organizationsCreated     Organization[]           @relation("OrganizationCreator")
+  organizationMembers      OrganizationMember[]
+  invitationsSent          OrganizationInvitation[] @relation("InvitationInviter")
+  invitationsReceived      OrganizationInvitation[] @relation("InvitationTarget")
+  sessions                 UserSession[]
+  activeOrganization       UserActiveOrganization?
+  driverLocations          DriverLocation[]
+  driverLocationLatest     DriverLocationLatest?
+  activityDocumentsUploaded ActivityDocument[]
+
+  @@index([registrationType], map: "idx_users_registration_type")
+  @@map("users")
+}
+
+model DriverProfile {
+  userId      String   @id @map("user_id") @db.Uuid
+  city        String
+  district    String
+  country     String   @default("Türkiye")
+  addressLine String   @map("address_line")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("driver_profiles")
+}
+
+model Organization {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  orgType         OrganizationType @map("org_type")
+  displayName     String           @map("display_name")
+  logoUrl         String?          @map("logo_url")
+  taxOffice       String           @map("tax_office")
+  taxNumber       String           @unique @map("tax_number")
+  landlinePhone   String?          @map("landline_phone")
+  mobilePhone     String?          @map("mobile_phone")
+  email           String           @db.Citext
+  websiteUrl      String?          @map("website_url")
+  city            String
+  district        String
+  country         String           @default("Türkiye")
+  addressLine     String           @map("address_line")
+  createdByUserId String           @map("created_by_user_id") @db.Uuid
+  isActive        Boolean          @default(true) @map("is_active")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  createdBy        User                     @relation("OrganizationCreator", fields: [createdByUserId], references: [id])
+  sectors          OrganizationSector[]
+  activityDocuments ActivityDocument[]
+  members          OrganizationMember[]
+  invitations      OrganizationInvitation[]
+  activeForUsers   UserActiveOrganization[]
+  driverLocations  DriverLocation[]
+
+  @@index([orgType], map: "idx_organizations_org_type")
+  @@index([createdByUserId], map: "idx_organizations_created_by")
+  @@map("organizations")
+}
+
+model OrganizationSector {
+  organizationId String     @map("organization_id") @db.Uuid
+  sector         SectorCode
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, sector])
+  @@map("organization_sectors")
+}
+
+model ActivityDocument {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  documentName     String   @map("document_name")
+  fileUrl          String   @map("file_url")
+  fileMime         String?  @map("file_mime")
+  fileSizeBytes    BigInt?  @map("file_size_bytes")
+  sortOrder        Int      @default(0) @map("sort_order")
+  uploadedByUserId String?  @map("uploaded_by_user_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  uploadedBy   User?        @relation(fields: [uploadedByUserId], references: [id])
+
+  @@index([organizationId], map: "idx_activity_documents_org")
+  @@map("activity_documents")
+}
+
+model OrganizationMember {
+  id               String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId   String                 @map("organization_id") @db.Uuid
+  userId           String                 @map("user_id") @db.Uuid
+  memberRole       OrganizationMemberRole @map("member_role")
+  status           InvitationStatus       @default(accepted)
+  companyPosition  String?                @map("company_position")
+  isSelfDriver     Boolean                @default(false) @map("is_self_driver")
+  canViewLocations Boolean                @default(true) @map("can_view_locations")
+  shareLocation    Boolean                @default(true) @map("share_location")
+  invitedByUserId  String?                @map("invited_by_user_id") @db.Uuid
+  joinedAt         DateTime?              @map("joined_at") @db.Timestamptz(6)
+  createdAt        DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId, memberRole], map: "idx_organization_members_org_user_role")
+  @@index([userId], map: "idx_organization_members_user")
+  @@index([organizationId, status], map: "idx_organization_members_org_status")
+  @@map("organization_members")
+}
+
+model UserActiveOrganization {
+  userId         String   @id @map("user_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("user_active_organizations")
+}
+
+model OrganizationInvitation {
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId  String                 @map("organization_id") @db.Uuid
+  invitedByUserId String                 @map("invited_by_user_id") @db.Uuid
+  inviteRole      OrganizationMemberRole @default(driver) @map("invite_role")
+  targetUserId    String?                @map("target_user_id") @db.Uuid
+  targetPhone     String?                @map("target_phone")
+  targetEmail     String?                @map("target_email") @db.Citext
+  inviteCode      String                 @unique @default(dbgenerated("encode(gen_random_bytes(16), 'hex'::text)")) @map("invite_code")
+  status          InvitationStatus       @default(pending)
+  message         String?
+  expiresAt       DateTime               @default(dbgenerated("(now() + '7 days'::interval)")) @map("expires_at") @db.Timestamptz(6)
+  respondedAt     DateTime?              @map("responded_at") @db.Timestamptz(6)
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitationInviter", fields: [invitedByUserId], references: [id])
+  targetUser   User?        @relation("InvitationTarget", fields: [targetUserId], references: [id])
+
+  @@index([organizationId, status], map: "idx_org_invitations_org_status")
+  @@map("organization_invitations")
+}
+
+model UserSession {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash")
+  deviceLabel      String?   @map("device_label")
+  ipAddress        String?   @map("ip_address")
+  userAgent        String?   @map("user_agent")
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_user_sessions_user")
+  @@map("user_sessions")
+}
+
+model DriverLocation {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  organizationId String? @map("organization_id") @db.Uuid
+  latitude       Float
+  longitude      Float
+  accuracyM      Float?    @map("accuracy_m")
+  speedMps       Float?    @map("speed_mps")
+  headingDeg     Float?    @map("heading_deg")
+  batteryPercent Int?      @map("battery_percent") @db.SmallInt
+  recordedAt     DateTime  @default(now()) @map("recorded_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization? @relation(fields: [organizationId], references: [id])
+
+  @@index([userId, recordedAt(sort: Desc)], map: "idx_driver_locations_user_recorded")
+  @@map("driver_locations")
+}
+
+model DriverLocationLatest {
+  userId         String   @id @map("user_id") @db.Uuid
+  organizationId String?  @map("organization_id") @db.Uuid
+  latitude       Float
+  longitude      Float
+  accuracyM      Float?   @map("accuracy_m")
+  speedMps       Float?   @map("speed_mps")
+  headingDeg     Float?   @map("heading_deg")
+  batteryPercent Int?     @map("battery_percent") @db.SmallInt
+  recordedAt     DateTime @map("recorded_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("driver_location_latest")
+}
