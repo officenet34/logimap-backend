@@ -19,6 +19,7 @@ import { hashPin, verifyPin } from '../common/utils/password.util';
 import { normalizePhone, isValidE164, phoneLookupValues } from '../common/utils/phone.util';
 import {
   formatSectorLabels,
+  formatSectorLines,
   resolveSectors,
 } from '../common/utils/sectors.util';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
@@ -566,8 +567,10 @@ export class AuthService {
       ...user,
       profileCity: city,
       profileDistrict: district,
+      profileOrganizationName: org?.displayName ?? null,
       profileSectorCodes: sectorCodes,
       profileSectorLabel: formatSectorLabels(sectorCodes),
+      profileSectorLines: formatSectorLines(sectorCodes),
       profileLocationLabel,
       profileYearsInSector: yearsInSector,
     };
