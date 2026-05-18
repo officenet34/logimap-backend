@@ -17,7 +17,10 @@ import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin, verifyPin } from '../common/utils/password.util';
 import { normalizePhone, isValidE164, phoneLookupValues } from '../common/utils/phone.util';
-import { resolveSectors } from '../common/utils/sectors.util';
+import {
+  formatSectorLabels,
+  resolveSectors,
+} from '../common/utils/sectors.util';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { LoginDto } from './dto/login.dto';
 import { RegisterSoleProprietorDto } from './dto/register-sole-proprietor.dto';
@@ -494,11 +497,16 @@ export class AuthService {
         firstName: true,
         lastName: true,
         gender: true,
+        createdAt: true,
         profileImageUrl: true,
         profileImageThumbnailUrl: true,
-        driverProfile: true,
+        driverProfile: {
+          select: { city: true, district: true, country: true },
+        },
         organizationMembers: {
           where: { status: InvitationStatus.accepted },
+          orderBy: { joinedAt: 'desc' },
+          take: 1,
           include: {
             organization: {
               select: {
@@ -506,17 +514,63 @@ export class AuthService {
                 orgType: true,
                 displayName: true,
                 logoUrl: true,
+                city: true,
+                district: true,
+                sectors: { select: { sector: true } },
               },
             },
           },
         },
         activeOrganization: {
-          include: { organization: true },
+          include: {
+            organization: {
+              select: {
+                id: true,
+                orgType: true,
+                displayName: true,
+                logoUrl: true,
+                city: true,
+                district: true,
+                sectors: { select: { sector: true } },
+              },
+            },
+          },
         },
       },
     });
     if (!user) throw new UnauthorizedException();
-    return user;
+
+    const activeOrg = user.activeOrganization?.organization;
+    const memberOrg = user.organizationMembers[0]?.organization;
+    const org = activeOrg ?? memberOrg;
+
+    const city = user.driverProfile?.city ?? org?.city ?? null;
+    const district = user.driverProfile?.district ?? org?.district ?? null;
+    const sectorCodes =
+      org?.sectors?.map((s) => s.sector) ?? [];
+
+    const yearsInSector = Math.max(
+      1,
+      Math.floor(
+        (Date.now() - user.createdAt.getTime()) /
+          (365.25 * 24 * 60 * 60 * 1000),
+      ),
+    );
+
+    const profileLocationLabel =
+      city && district
+        ? `${district}/${city.toLocaleUpperCase('tr-TR')}`
+        : null;
+
+    return {
+      ...user,
+      profileCity: city,
+      profileDistrict: district,
+      profileSectorCodes: sectorCodes,
+      profileSectorLabel: formatSectorLabels(sectorCodes),
+      profileLocationLabel,
+      profileYearsInSector: yearsInSector,
+    };
   }
 
   private async issueTokens(
