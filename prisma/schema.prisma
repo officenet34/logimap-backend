@@ -83,9 +83,27 @@ model User {
   driverLocations          DriverLocation[]
   driverLocationLatest     DriverLocationLatest?
   activityDocumentsUploaded ActivityDocument[]
+  pushTokens               UserPushToken[]
 
   @@index([registrationType], map: "idx_users_registration_type")
   @@map("users")
+}
+
+model UserPushToken {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  fcmToken    String   @map("fcm_token")
+  platform    String
+  deviceLabel String?  @map("device_label")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fcmToken], map: "user_push_tokens_user_fcm_unique")
+  @@index([userId], map: "idx_user_push_tokens_user")
+  @@map("user_push_tokens")
 }
 
 model DriverProfile {

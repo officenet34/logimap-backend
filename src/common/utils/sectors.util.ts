@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { SectorCode } from '@prisma/client';
 
 const ALL_SECTORS: SectorCode[] = [
@@ -12,7 +13,7 @@ export function resolveSectors(input: (SectorCode | 'all')[]): SectorCode[] {
   }
   const filtered = input.filter((s): s is SectorCode => s !== 'all');
   if (!filtered.length) {
-    throw new Error('En az bir sektör seçilmelidir');
+    throw new BadRequestException('En az bir sektör seçilmelidir');
   }
   return [...new Set(filtered)];
 }

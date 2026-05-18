@@ -1,8 +1,4 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import {
-  InvitationStatus,
-  OrganizationMemberRole,
-} from '@prisma/client';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IngestLocationDto } from './dto/ingest-location.dto';
 
@@ -11,26 +7,13 @@ export class LocationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async ingest(userId: string, dto: IngestLocationDto) {
-    let organizationId = dto.organizationId;
+    let organizationId = dto.organizationId ?? null;
 
-    if (organizationId) {
-      const member = await this.prisma.organizationMember.findFirst({
-        where: {
-          organizationId,
-          userId,
-          memberRole: OrganizationMemberRole.driver,
-          status: InvitationStatus.accepted,
-          shareLocation: true,
-        },
-      });
-      if (!member) {
-        throw new ForbiddenException('Bu işletme için konum gönderemezsiniz');
-      }
-    } else {
+    if (!organizationId) {
       const active = await this.prisma.userActiveOrganization.findUnique({
         where: { userId },
       });
-      organizationId = active?.organizationId;
+      organizationId = active?.organizationId ?? null;
     }
 
     const recordedAt = new Date();
@@ -53,6 +36,27 @@ export class LocationsService {
       success: true,
       id: location.id,
       recordedAt: location.recordedAt,
+    };
+  }
+
+  async getMyLatest(userId: string) {
+    const latest = await this.prisma.driverLocationLatest.findUnique({
+      where: { userId },
+    });
+    if (!latest) {
+      return { location: null };
+    }
+    return {
+      location: {
+        latitude: latest.latitude,
+        longitude: latest.longitude,
+        accuracyM: latest.accuracyM,
+        speedMps: latest.speedMps,
+        headingDeg: latest.headingDeg,
+        batteryPercent: latest.batteryPercent,
+        recordedAt: latest.recordedAt,
+        organizationId: latest.organizationId,
+      },
     };
   }
 }
