@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
@@ -8,6 +17,8 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { RegisterSoleProprietorDto } from './dto/register-sole-proprietor.dto';
 import { RegisterCompanyDto } from './dto/register-company.dto';
 import { RegisterDriverDto } from './dto/register-driver.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
@@ -68,5 +79,29 @@ export class AuthController {
   @Get('me')
   me(@CurrentUser() user: JwtPayload) {
     return this.auth.me(user.sub);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  updateProfile(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    return this.auth.updateProfile(user.sub, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  changePassword(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.auth.changePassword(user.sub, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('me')
+  deleteAccount(@CurrentUser() user: JwtPayload) {
+    return this.auth.deleteAccount(user.sub);
   }
 }

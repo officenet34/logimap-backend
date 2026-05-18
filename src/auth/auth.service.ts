@@ -394,6 +394,94 @@ export class AuthService {
     return { success: true };
   }
 
+  async updateProfile(
+    userId: string,
+    dto: {
+      firstName?: string;
+      lastName?: string;
+      phone?: string;
+      profileImageUrl?: string;
+    },
+  ) {
+    const data: Prisma.UserUpdateInput = {};
+    if (dto.firstName != null) data.firstName = dto.firstName.trim();
+    if (dto.lastName != null) data.lastName = dto.lastName.trim();
+    if (dto.profileImageUrl != null) {
+      data.profileImageUrl = dto.profileImageUrl.trim() || null;
+    }
+    if (dto.phone != null) {
+      const phone = normalizePhone(dto.phone);
+      if (!isValidE164(phone)) throw new BadRequestException('Geçersiz telefon');
+      const other = await this.prisma.user.findFirst({
+        where: { phone, NOT: { id: userId } },
+      });
+      if (other) throw new ConflictException('Bu telefon başka bir hesapta kayıtlı');
+      data.phone = phone;
+    }
+
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        firstName: true,
+        lastName: true,
+        profileImageUrl: true,
+        registrationType: true,
+      },
+    });
+    return user;
+  }
+
+  async changePassword(
+    userId: string,
+    dto: {
+      currentPassword: string;
+      newPassword: string;
+      newPasswordConfirm: string;
+    },
+  ) {
+    this.assertPasswordMatch(dto.newPassword, dto.newPasswordConfirm);
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user?.isActive) throw new UnauthorizedException();
+
+    const ok = await verifyPin(dto.currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedException('Mevcut şifre hatalı');
+
+    const passwordHash = await hashPin(dto.newPassword);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
+
+    await this.prisma.userSession.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+
+    return { success: true };
+  }
+
+  async deleteAccount(userId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: { isActive: false },
+      });
+    });
+
+    return { success: true };
+  }
+
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
