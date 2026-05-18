@@ -7,6 +7,24 @@ export class LocationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async ingest(userId: string, dto: IngestLocationDto) {
+    const minGapMs = 55_000;
+    const recent = await this.prisma.driverLocation.findFirst({
+      where: { userId },
+      orderBy: { recordedAt: 'desc' },
+      select: { id: true, recordedAt: true },
+    });
+    if (
+      recent?.recordedAt &&
+      Date.now() - recent.recordedAt.getTime() < minGapMs
+    ) {
+      return {
+        success: true,
+        id: recent.id,
+        recordedAt: recent.recordedAt,
+        deduplicated: true,
+      };
+    }
+
     let organizationId = dto.organizationId ?? null;
 
     if (!organizationId) {
