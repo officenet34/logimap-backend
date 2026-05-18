@@ -52,6 +52,7 @@ enum SectorCode {
   transport_services
   home_moving
   cargo
+  logistics
 
   @@map("sector_code")
 }
