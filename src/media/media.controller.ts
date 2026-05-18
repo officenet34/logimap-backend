@@ -22,6 +22,28 @@ if (!existsSync(uploadDir)) {
   mkdirSync(uploadDir, { recursive: true });
 }
 
+const IMAGE_EXTENSIONS = new Set([
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.heic',
+  '.heif',
+]);
+
+function isAcceptedImage(file: Express.Multer.File): boolean {
+  const mime = (file.mimetype ?? '').toLowerCase();
+  if (mime.startsWith('image/')) return true;
+  const ext = extname(file.originalname).toLowerCase();
+  if (!IMAGE_EXTENSIONS.has(ext)) return false;
+  return (
+    mime === 'application/octet-stream' ||
+    mime === 'binary/octet-stream' ||
+    mime === ''
+  );
+}
+
 function avatarFileInterceptor() {
   return FileInterceptor('file', {
     storage: diskStorage({
@@ -41,7 +63,7 @@ function avatarFileInterceptor() {
       file: Express.Multer.File,
       cb: (error: Error | null, accept: boolean) => void,
     ) => {
-      if (!file.mimetype.startsWith('image/')) {
+      if (!isAcceptedImage(file)) {
         cb(new BadRequestException('Sadece resim dosyası yüklenebilir'), false);
         return;
       }
