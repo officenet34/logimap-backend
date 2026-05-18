@@ -429,6 +429,7 @@ export class AuthService {
         firstName: true,
         lastName: true,
         profileImageUrl: true,
+        profileImageThumbnailUrl: true,
         registrationType: true,
       },
     });
@@ -494,6 +495,7 @@ export class AuthService {
         lastName: true,
         gender: true,
         profileImageUrl: true,
+        profileImageThumbnailUrl: true,
         driverProfile: true,
         organizationMembers: {
           where: { status: InvitationStatus.accepted },

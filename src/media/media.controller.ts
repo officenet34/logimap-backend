@@ -3,10 +3,11 @@ import {
   Controller,
   Post,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import type { Request } from 'express';
 import { extname, join } from 'path';
@@ -44,32 +45,48 @@ function isAcceptedImage(file: Express.Multer.File): boolean {
   );
 }
 
-function avatarFileInterceptor() {
-  return FileInterceptor('file', {
-    storage: diskStorage({
-      destination: uploadDir,
-      filename: (
-        _req: Request,
-        file: Express.Multer.File,
-        cb: (error: Error | null, filename: string) => void,
-      ) => {
-        const ext = extname(file.originalname).toLowerCase() || '.jpg';
-        cb(null, `${randomUUID()}${ext}`);
-      },
-    }),
-    limits: { fileSize: 5 * 1024 * 1024 },
-    fileFilter: (
+const avatarMulterOptions = {
+  storage: diskStorage({
+    destination: uploadDir,
+    filename: (
       _req: Request,
       file: Express.Multer.File,
-      cb: (error: Error | null, accept: boolean) => void,
+      cb: (error: Error | null, filename: string) => void,
     ) => {
-      if (!isAcceptedImage(file)) {
-        cb(new BadRequestException('Sadece resim dosyası yüklenebilir'), false);
-        return;
-      }
-      cb(null, true);
+      const ext =
+        file.fieldname === 'thumbnail'
+          ? '.jpg'
+          : extname(file.originalname).toLowerCase() || '.jpg';
+      const prefix = file.fieldname === 'thumbnail' ? 'thumb_' : '';
+      cb(null, `${prefix}${randomUUID()}${ext}`);
     },
-  });
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (
+    _req: Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, accept: boolean) => void,
+  ) => {
+    if (!isAcceptedImage(file)) {
+      cb(new BadRequestException('Sadece resim dosyası yüklenebilir'), false);
+      return;
+    }
+    cb(null, true);
+  },
+};
+
+function avatarFileInterceptor() {
+  return FileInterceptor('file', avatarMulterOptions);
+}
+
+function avatarWithThumbInterceptor() {
+  return FileFieldsInterceptor(
+    [
+      { name: 'file', maxCount: 1 },
+      { name: 'thumbnail', maxCount: 1 },
+    ],
+    avatarMulterOptions,
+  );
 }
 
 @Controller('media')
@@ -86,28 +103,45 @@ export class MediaController {
   /** Oturum açıkken profil fotoğrafı + users.profile_image_url güncelleme */
   @Post('me/avatar')
   @UseGuards(JwtAuthGuard)
-  @UseInterceptors(avatarFileInterceptor())
+  @UseInterceptors(avatarWithThumbInterceptor())
   async uploadMyAvatar(
-    @UploadedFile() file: Express.Multer.File | undefined,
+    @UploadedFiles()
+    files: {
+      file?: Express.Multer.File[];
+      thumbnail?: Express.Multer.File[];
+    },
     @CurrentUser() user: JwtPayload,
   ) {
-    const result = this.buildAvatarResponse(file);
+    const main = files.file?.[0];
+    const thumb = files.thumbnail?.[0];
+    const result = this.buildAvatarResponse(main, thumb);
     await this.prisma.user.update({
       where: { id: user.sub },
-      data: { profileImageUrl: result.url },
+      data: {
+        profileImageUrl: result.url,
+        profileImageThumbnailUrl: result.thumbnailUrl,
+      },
     });
     return result;
   }
 
-  private buildAvatarResponse(file?: Express.Multer.File) {
+  private buildAvatarResponse(
+    file?: Express.Multer.File,
+    thumbFile?: Express.Multer.File,
+  ) {
     if (!file) {
       throw new BadRequestException('Dosya gerekli');
     }
     const base =
       process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
       'http://c6dx2th5a53norwcfwbiu3xn.195.85.201.153.sslip.io';
+    const url = `${base}/uploads/avatars/${file.filename}`;
+    const thumbnailUrl = thumbFile
+      ? `${base}/uploads/avatars/${thumbFile.filename}`
+      : url;
     return {
-      url: `${base}/uploads/avatars/${file.filename}`,
+      url,
+      thumbnailUrl,
       filename: file.filename,
     };
   }
