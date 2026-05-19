@@ -20,7 +20,15 @@ NestJS + Prisma + PostgreSQL (`logimap_db`)
 | `JWT_ACCESS_TTL` | `15m` |
 | `JWT_REFRESH_TTL` | `30d` |
 | `CORS_ORIGINS` | `*` veya domain listesi |
+| `PUBLIC_API_URL` | `https://api.logimap.com.tr` (avatar/upload URL’leri) |
 | `PORT` | `3000` |
+
+### Coolify domain (Traefik)
+
+| Alt alan | Amaç |
+|----------|------|
+| `logimap.com.tr` | Web sitesi (ayrı servis / statik) |
+| `api.logimap.com.tr` | Bu NestJS backend — health: `GET /v1/health` |
 
 ## API özeti
 

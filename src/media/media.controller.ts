@@ -134,7 +134,7 @@ export class MediaController {
     }
     const base =
       process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
-      'http://c6dx2th5a53norwcfwbiu3xn.195.85.201.153.sslip.io';
+      'https://api.logimap.com.tr';
     const url = `${base}/uploads/avatars/${file.filename}`;
     const thumbnailUrl = thumbFile
       ? `${base}/uploads/avatars/${thumbFile.filename}`
