@@ -10,6 +10,12 @@ import { VehiclesService } from './vehicles.service';
 export class VehiclesController {
   constructor(private readonly vehicles: VehiclesService) {}
 
+  @Get('fleet')
+  async listFleet(@CurrentUser() user: JwtPayload) {
+    const vehicles = await this.vehicles.listFleet(user.sub);
+    return { vehicles };
+  }
+
   @Get('me')
   async getMine(@CurrentUser() user: JwtPayload) {
     const vehicle = await this.vehicles.getMine(user.sub);
@@ -20,11 +26,5 @@ export class VehiclesController {
   async upsertMine(@CurrentUser() user: JwtPayload, @Body() dto: UpsertVehicleDto) {
     const vehicle = await this.vehicles.upsertMine(user.sub, dto);
     return { vehicle };
-  }
-
-  @Get('fleet')
-  async listFleet(@CurrentUser() user: JwtPayload) {
-    const vehicles = await this.vehicles.listFleet(user.sub);
-    return { vehicles };
   }
 }

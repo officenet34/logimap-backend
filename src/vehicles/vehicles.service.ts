@@ -64,80 +64,85 @@ export class VehiclesService {
     return this.getMine(userId);
   }
 
-  /** İşletmedeki kayıtlı araçlar (şoför + araç + son konum). */
+  /** İşletmedeki kayıtlı araçlar (tüm üyeler + kendi aracınız). */
   async listFleet(userId: string) {
-    const user = await this.prisma.user.findUnique({
+    type FleetUser = Parameters<VehiclesService['mapFleetRow']>[0];
+
+    const seen = new Set<string>();
+    const rows: ReturnType<VehiclesService['mapFleetRow']>[] = [];
+
+    const pushUser = (u: FleetUser | null | undefined) => {
+      if (!u?.driverVehicle || seen.has(u.id)) return;
+      seen.add(u.id);
+      rows.push(this.mapFleetRow(u));
+    };
+
+    const userSelect = {
+      id: true,
+      firstName: true,
+      lastName: true,
+      profileImageUrl: true,
+      profileImageThumbnailUrl: true,
+      driverVehicle: {
+        include: {
+          images: { orderBy: { sortOrder: 'asc' as const } },
+        },
+      },
+      driverLocationLatest: true,
+    } as const;
+
+    const self = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: userSelect,
+    });
+    pushUser(self as FleetUser | null);
+
+    const ctx = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        registrationType: true,
         activeOrganization: { select: { organizationId: true } },
         organizationMembers: {
           where: { status: InvitationStatus.accepted },
           orderBy: { joinedAt: 'desc' },
           take: 1,
-          select: { organizationId: true, memberRole: true },
+          select: { organizationId: true },
         },
       },
     });
-    if (!user) return [];
 
     const orgId =
-      user.activeOrganization?.organizationId ??
-      user.organizationMembers[0]?.organizationId;
+      ctx?.activeOrganization?.organizationId ??
+      ctx?.organizationMembers[0]?.organizationId;
 
-    const isOrgManager =
-      user.registrationType === RegistrationAccountType.sole_proprietor ||
-      user.registrationType === RegistrationAccountType.company;
-
-    if (orgId && isOrgManager) {
-      const drivers = await this.prisma.organizationMember.findMany({
+    if (orgId) {
+      const members = await this.prisma.organizationMember.findMany({
         where: {
           organizationId: orgId,
           status: InvitationStatus.accepted,
-          memberRole: OrganizationMemberRole.driver,
         },
         include: {
-          user: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true,
-              profileImageUrl: true,
-              profileImageThumbnailUrl: true,
-              driverVehicle: {
-                include: {
-                  images: { orderBy: { sortOrder: 'asc' } },
-                },
-              },
-              driverLocationLatest: true,
-            },
-          },
+          user: { select: userSelect },
         },
         orderBy: { joinedAt: 'asc' },
       });
+      for (const m of members) {
+        pushUser(m.user as FleetUser);
+      }
 
-      return drivers
-        .filter((m) => m.user.driverVehicle != null)
-        .map((m) => this.mapFleetRow(m.user));
+      const org = await this.prisma.organization.findUnique({
+        where: { id: orgId },
+        select: { createdByUserId: true },
+      });
+      if (org?.createdByUserId) {
+        const creator = await this.prisma.user.findUnique({
+          where: { id: org.createdByUserId },
+          select: userSelect,
+        });
+        pushUser(creator as FleetUser | null);
+      }
     }
 
-    const self = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        profileImageUrl: true,
-        profileImageThumbnailUrl: true,
-        driverVehicle: {
-          include: { images: { orderBy: { sortOrder: 'asc' } } },
-        },
-        driverLocationLatest: true,
-      },
-    });
-
-    if (!self?.driverVehicle) return [];
-    return [this.mapFleetRow(self)];
+    return rows;
   }
 
   private mapFleetRow(user: {

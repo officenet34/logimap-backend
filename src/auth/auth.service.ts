@@ -702,6 +702,7 @@ export class AuthService {
       profileCountry: country,
       profileAddressLine: addressLine,
       profileOrganizationName: org?.displayName ?? null,
+      profileOrganizationId: org?.id ?? null,
       profileTaxOffice: org?.taxOffice ?? null,
       profileSectorCodes: sectorCodes,
       profileSectorLabel: formatSectorLabels(sectorCodes),
