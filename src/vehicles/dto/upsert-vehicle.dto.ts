@@ -22,7 +22,14 @@ export class VehicleImageRowDto {
 
 export class UpsertVehicleDto {
   @IsString()
-  makeModel!: string;
+  vehicleBrand!: string;
+
+  @IsString()
+  vehicleModel!: string;
+
+  @IsOptional()
+  @IsString()
+  makeModel?: string;
 
   @IsString()
   plateVehicle!: string;

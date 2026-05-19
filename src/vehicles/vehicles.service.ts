@@ -20,18 +20,23 @@ export class VehiclesService {
     const {
       images: _omit,
       plateTrailer,
+      makeModel: _legacyMakeModel,
       ...scalar
     } = dto;
+
+    const makeModel = `${dto.vehicleBrand} ${dto.vehicleModel}`.trim();
 
     const vehicle = await this.prisma.driverVehicle.upsert({
       where: { userId },
       create: {
         userId,
         ...scalar,
+        makeModel,
         plateTrailer: plateTrailer ?? null,
       },
       update: {
         ...scalar,
+        makeModel,
         plateTrailer: plateTrailer ?? null,
       },
     });
