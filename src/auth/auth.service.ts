@@ -402,7 +402,24 @@ export class AuthService {
   async updateProfile(userId: string, dto: UpdateProfileDto) {
     const existing = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { registrationType: true },
+      select: {
+        registrationType: true,
+        activeOrganization: { select: { organizationId: true } },
+        organizationMembers: {
+          where: {
+            status: InvitationStatus.accepted,
+            memberRole: {
+              in: [
+                OrganizationMemberRole.owner,
+                OrganizationMemberRole.manager,
+              ],
+            },
+          },
+          orderBy: { joinedAt: 'desc' },
+          take: 1,
+          select: { organizationId: true },
+        },
+      },
     });
     if (!existing) throw new UnauthorizedException();
 
@@ -413,7 +430,18 @@ export class AuthService {
       data.profileImageUrl = dto.profileImageUrl.trim() || null;
     }
     if (dto.gender != null) data.gender = dto.gender;
-    if (dto.nationalId != null) data.nationalId = dto.nationalId.trim();
+    if (dto.nationalId != null) {
+      const nid = dto.nationalId.trim();
+      if (
+        existing.registrationType === RegistrationAccountType.driver ||
+        existing.registrationType === RegistrationAccountType.company
+      ) {
+        if (nid.length !== 11 || !/^\d{11}$/.test(nid)) {
+          throw new BadRequestException('TC Kimlik No 11 haneli olmalıdır');
+        }
+      }
+      data.nationalId = nid;
+    }
     if (dto.phone != null) {
       const phone = normalizePhone(dto.phone);
       if (!isValidE164(phone)) throw new BadRequestException('Geçersiz telefon');
@@ -424,15 +452,32 @@ export class AuthService {
       data.phone = phone;
     }
 
+    const addressPatch =
+      dto.city != null ||
+      dto.district != null ||
+      dto.country != null ||
+      dto.addressLine != null;
+
     const driverPatch =
       existing.registrationType === RegistrationAccountType.driver &&
-      (dto.city != null ||
-        dto.district != null ||
-        dto.country != null ||
-        dto.addressLine != null);
+      addressPatch;
+
+    const organizationId =
+      existing.activeOrganization?.organizationId ??
+      existing.organizationMembers[0]?.organizationId;
+
+    const orgPatch =
+      organizationId != null &&
+      (existing.registrationType === RegistrationAccountType.sole_proprietor ||
+        existing.registrationType === RegistrationAccountType.company) &&
+      (addressPatch ||
+        dto.businessName != null ||
+        dto.taxOffice != null ||
+        dto.sectors != null);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: userId }, data });
+
       if (driverPatch) {
         const profile = await tx.driverProfile.findUnique({
           where: { userId },
@@ -465,6 +510,45 @@ export class AuthService {
                 ? { addressLine: dto.addressLine.trim() }
                 : {}),
             },
+          });
+        }
+      }
+
+      if (orgPatch) {
+        const orgData: Prisma.OrganizationUpdateInput = {};
+        if (dto.businessName != null) {
+          orgData.displayName = dto.businessName.trim();
+        }
+        if (dto.taxOffice != null) {
+          orgData.taxOffice = dto.taxOffice.trim();
+        }
+        if (dto.city != null) orgData.city = dto.city.trim();
+        if (dto.district != null) orgData.district = dto.district.trim();
+        if (dto.country != null) orgData.country = dto.country.trim();
+        if (dto.addressLine != null) {
+          orgData.addressLine = dto.addressLine.trim();
+        }
+        if (dto.phone != null) {
+          orgData.mobilePhone = normalizePhone(dto.phone);
+        }
+
+        if (Object.keys(orgData).length > 0) {
+          await tx.organization.update({
+            where: { id: organizationId! },
+            data: orgData,
+          });
+        }
+
+        if (dto.sectors != null) {
+          const sectors = resolveSectors(dto.sectors);
+          await tx.organizationSector.deleteMany({
+            where: { organizationId: organizationId! },
+          });
+          await tx.organizationSector.createMany({
+            data: sectors.map((sector) => ({
+              organizationId: organizationId!,
+              sector,
+            })),
           });
         }
       }
@@ -553,9 +637,12 @@ export class AuthService {
                 id: true,
                 orgType: true,
                 displayName: true,
+                taxOffice: true,
                 logoUrl: true,
                 city: true,
                 district: true,
+                country: true,
+                addressLine: true,
                 sectors: { select: { sector: true } },
               },
             },
@@ -568,9 +655,12 @@ export class AuthService {
                 id: true,
                 orgType: true,
                 displayName: true,
+                taxOffice: true,
                 logoUrl: true,
                 city: true,
                 district: true,
+                country: true,
+                addressLine: true,
                 sectors: { select: { sector: true } },
               },
             },
@@ -586,6 +676,9 @@ export class AuthService {
 
     const city = user.driverProfile?.city ?? org?.city ?? null;
     const district = user.driverProfile?.district ?? org?.district ?? null;
+    const country = user.driverProfile?.country ?? org?.country ?? null;
+    const addressLine =
+      user.driverProfile?.addressLine ?? org?.addressLine ?? null;
     const sectorCodes =
       org?.sectors?.map((s) => s.sector) ?? [];
 
@@ -606,7 +699,10 @@ export class AuthService {
       ...user,
       profileCity: city,
       profileDistrict: district,
+      profileCountry: country,
+      profileAddressLine: addressLine,
       profileOrganizationName: org?.displayName ?? null,
+      profileTaxOffice: org?.taxOffice ?? null,
       profileSectorCodes: sectorCodes,
       profileSectorLabel: formatSectorLabels(sectorCodes),
       profileSectorLines: formatSectorLines(sectorCodes),
@@ -637,7 +733,7 @@ export class AuthService {
     });
 
     const refreshToken = crypto.randomBytes(48).toString('hex');
-    const refreshDays = 30;
+    const refreshDays = Number(this.config.get('JWT_REFRESH_DAYS', '90'));
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + refreshDays);
 

@@ -1,5 +1,6 @@
 import { GenderType } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, Length, Matches, MinLength } from 'class-validator';
+import { IsArray, IsEnum, IsOptional, IsString, MinLength } from 'class-validator';
+import { SectorCode } from '@prisma/client';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -26,8 +27,6 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
-  @Length(11, 11)
-  @Matches(/^\d{11}$/)
   nationalId?: string;
 
   @IsOptional()
@@ -48,4 +47,18 @@ export class UpdateProfileDto {
   @IsString()
   @MinLength(3)
   addressLine?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  businessName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  taxOffice?: string;
+
+  @IsOptional()
+  @IsArray()
+  sectors?: (SectorCode | 'all')[];
 }
