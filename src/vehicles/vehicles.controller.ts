@@ -21,4 +21,10 @@ export class VehiclesController {
     const vehicle = await this.vehicles.upsertMine(user.sub, dto);
     return { vehicle };
   }
+
+  @Get('fleet')
+  async listFleet(@CurrentUser() user: JwtPayload) {
+    const vehicles = await this.vehicles.listFleet(user.sub);
+    return { vehicles };
+  }
 }
