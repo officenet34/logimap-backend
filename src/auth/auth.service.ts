@@ -27,6 +27,7 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterSoleProprietorDto } from './dto/register-sole-proprietor.dto';
 import { RegisterCompanyDto } from './dto/register-company.dto';
 import { RegisterDriverDto } from './dto/register-driver.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class AuthService {
@@ -398,21 +399,21 @@ export class AuthService {
     return { success: true };
   }
 
-  async updateProfile(
-    userId: string,
-    dto: {
-      firstName?: string;
-      lastName?: string;
-      phone?: string;
-      profileImageUrl?: string;
-    },
-  ) {
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const existing = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { registrationType: true },
+    });
+    if (!existing) throw new UnauthorizedException();
+
     const data: Prisma.UserUpdateInput = {};
     if (dto.firstName != null) data.firstName = dto.firstName.trim();
     if (dto.lastName != null) data.lastName = dto.lastName.trim();
     if (dto.profileImageUrl != null) {
       data.profileImageUrl = dto.profileImageUrl.trim() || null;
     }
+    if (dto.gender != null) data.gender = dto.gender;
+    if (dto.nationalId != null) data.nationalId = dto.nationalId.trim();
     if (dto.phone != null) {
       const phone = normalizePhone(dto.phone);
       if (!isValidE164(phone)) throw new BadRequestException('Geçersiz telefon');
@@ -423,21 +424,53 @@ export class AuthService {
       data.phone = phone;
     }
 
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data,
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        firstName: true,
-        lastName: true,
-        profileImageUrl: true,
-        profileImageThumbnailUrl: true,
-        registrationType: true,
-      },
+    const driverPatch =
+      existing.registrationType === RegistrationAccountType.driver &&
+      (dto.city != null ||
+        dto.district != null ||
+        dto.country != null ||
+        dto.addressLine != null);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data });
+      if (driverPatch) {
+        const profile = await tx.driverProfile.findUnique({
+          where: { userId },
+        });
+        if (!profile) {
+          if (
+            !dto.city?.trim() ||
+            !dto.district?.trim() ||
+            !dto.addressLine?.trim()
+          ) {
+            throw new BadRequestException('İl, ilçe ve adres gerekli');
+          }
+          await tx.driverProfile.create({
+            data: {
+              userId,
+              city: dto.city!.trim(),
+              district: dto.district!.trim(),
+              country: dto.country?.trim() || 'Türkiye',
+              addressLine: dto.addressLine!.trim(),
+            },
+          });
+        } else {
+          await tx.driverProfile.update({
+            where: { userId },
+            data: {
+              ...(dto.city != null ? { city: dto.city.trim() } : {}),
+              ...(dto.district != null ? { district: dto.district.trim() } : {}),
+              ...(dto.country != null ? { country: dto.country.trim() } : {}),
+              ...(dto.addressLine != null
+                ? { addressLine: dto.addressLine.trim() }
+                : {}),
+            },
+          });
+        }
+      }
     });
-    return user;
+
+    return this.me(userId);
   }
 
   async changePassword(
@@ -498,11 +531,17 @@ export class AuthService {
         firstName: true,
         lastName: true,
         gender: true,
+        nationalId: true,
         createdAt: true,
         profileImageUrl: true,
         profileImageThumbnailUrl: true,
         driverProfile: {
-          select: { city: true, district: true, country: true },
+          select: {
+            city: true,
+            district: true,
+            country: true,
+            addressLine: true,
+          },
         },
         organizationMembers: {
           where: { status: InvitationStatus.accepted },
