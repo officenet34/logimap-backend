@@ -86,9 +86,49 @@ model User {
   driverLocationLatest     DriverLocationLatest?
   activityDocumentsUploaded ActivityDocument[]
   pushTokens               UserPushToken[]
+  driverVehicle            DriverVehicle?
 
   @@index([registrationType], map: "idx_users_registration_type")
   @@map("users")
+}
+
+model DriverVehicle {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String   @unique @map("user_id") @db.Uuid
+  makeModel      String   @map("make_model")
+  plateVehicle   String   @map("plate_vehicle")
+  plateTrailer   String?  @map("plate_trailer")
+  vehicleType    String   @map("vehicle_type")
+  modelYear      String   @map("model_year")
+  color          String
+  bodyType       String   @map("body_type")
+  widthCm        String   @map("width_cm")
+  lengthCm       String   @map("length_cm")
+  heightCm       String   @map("height_cm")
+  bodyVolumeM3   String   @map("body_volume_m3")
+  tonnageKg      String   @map("tonnage_kg")
+  extraInfo      String   @map("extra_info") @db.Text
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images DriverVehicleImage[]
+
+  @@map("driver_vehicles")
+}
+
+model DriverVehicleImage {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vehicleId     String   @map("vehicle_id") @db.Uuid
+  imageUrl      String   @map("image_url")
+  thumbnailUrl  String   @map("thumbnail_url")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  vehicle DriverVehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId], map: "idx_driver_vehicle_images_vehicle")
+  @@map("driver_vehicle_images")
 }
 
 model UserPushToken {

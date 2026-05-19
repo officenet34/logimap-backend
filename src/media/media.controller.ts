@@ -23,6 +23,11 @@ if (!existsSync(uploadDir)) {
   mkdirSync(uploadDir, { recursive: true });
 }
 
+const vehicleUploadDir = join(process.cwd(), 'uploads', 'vehicles');
+if (!existsSync(vehicleUploadDir)) {
+  mkdirSync(vehicleUploadDir, { recursive: true });
+}
+
 const IMAGE_EXTENSIONS = new Set([
   '.jpg',
   '.jpeg',
@@ -89,6 +94,46 @@ function avatarWithThumbInterceptor() {
   );
 }
 
+const vehicleMulterOptions = {
+  storage: diskStorage({
+    destination: vehicleUploadDir,
+    filename: (
+      _req: Request,
+      file: Express.Multer.File,
+      cb: (error: Error | null, filename: string) => void,
+    ) => {
+      const ext =
+        file.fieldname === 'thumbnail'
+          ? '.jpg'
+          : extname(file.originalname).toLowerCase() || '.jpg';
+      const prefix = file.fieldname === 'thumbnail' ? 'thumb_' : '';
+      cb(null, `${prefix}${randomUUID()}${ext}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (
+    _req: Request,
+    file: Express.Multer.File,
+    cb: (error: Error | null, accept: boolean) => void,
+  ) => {
+    if (!isAcceptedImage(file)) {
+      cb(new BadRequestException('Sadece resim dosyası yüklenebilir'), false);
+      return;
+    }
+    cb(null, true);
+  },
+};
+
+function vehicleWithThumbInterceptor() {
+  return FileFieldsInterceptor(
+    [
+      { name: 'file', maxCount: 1 },
+      { name: 'thumbnail', maxCount: 1 },
+    ],
+    vehicleMulterOptions,
+  );
+}
+
 @Controller('media')
 export class MediaController {
   constructor(private readonly prisma: PrismaService) {}
@@ -125,6 +170,22 @@ export class MediaController {
     return result;
   }
 
+  /** Araç galerisi — DB kaydı PUT /vehicles/me ile yapılır; burada sadece dosya URL döner */
+  @Post('me/vehicle-image')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(vehicleWithThumbInterceptor())
+  uploadVehicleImage(
+    @UploadedFiles()
+    files: {
+      file?: Express.Multer.File[];
+      thumbnail?: Express.Multer.File[];
+    },
+  ) {
+    const main = files.file?.[0];
+    const thumb = files.thumbnail?.[0];
+    return this.buildVehicleImageResponse(main, thumb);
+  }
+
   private buildAvatarResponse(
     file?: Express.Multer.File,
     thumbFile?: Express.Multer.File,
@@ -138,6 +199,27 @@ export class MediaController {
     const url = `${base}/uploads/avatars/${file.filename}`;
     const thumbnailUrl = thumbFile
       ? `${base}/uploads/avatars/${thumbFile.filename}`
+      : url;
+    return {
+      url,
+      thumbnailUrl,
+      filename: file.filename,
+    };
+  }
+
+  private buildVehicleImageResponse(
+    file?: Express.Multer.File,
+    thumbFile?: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Dosya gerekli');
+    }
+    const base =
+      process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
+      'https://api.logimap.com.tr';
+    const url = `${base}/uploads/vehicles/${file.filename}`;
+    const thumbnailUrl = thumbFile
+      ? `${base}/uploads/vehicles/${thumbFile.filename}`
       : url;
     return {
       url,
