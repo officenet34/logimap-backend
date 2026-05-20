@@ -192,7 +192,6 @@ export class VehiclesService {
             latitude: loc.latitude,
             longitude: loc.longitude,
             recordedAt: loc.recordedAt.toISOString(),
-            battery_level: loc.batteryPercent ?? null,
           }
         : null,
     };
