@@ -1,16 +1,13 @@
 import {
-  BadGatewayException,
   Injectable,
+  NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EstimateRouteDto } from './dto/estimate-route.dto';
-import { RoutePointDto } from './dto/route-point.dto';
 
-/** OSRM — ücretsiz karayolu mesafesi (VDS veya kendi sunucunuz). */
-const DEFAULT_OSRM_BASE = 'https://router.project-osrm.org';
+/** XLS tablosundan süre tahmini (km başına ortalama kamyon hızı). */
+const AVG_SPEED_KMH = 70;
 
 export type RouteEstimateResponse = {
   cached: boolean;
@@ -21,193 +18,115 @@ export type RouteEstimateResponse = {
   toLabel: string;
 };
 
+type Segment = {
+  originProvince: string;
+  originDistrict: string;
+  destProvince: string;
+  destDistrict: string;
+};
+
 @Injectable()
 export class RoutesService {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
-
-  osrmBaseUrl(): string {
-    const raw =
-      this.config.get<string>('OSRM_BASE_URL')?.trim() || DEFAULT_OSRM_BASE;
-    return raw.replace(/\/$/, '');
-  }
-
-  isRoutesConfigured(): boolean {
-    return this.osrmBaseUrl().length > 0;
-  }
+  constructor(private readonly prisma: PrismaService) {}
 
   async estimate(dto: EstimateRouteDto): Promise<RouteEstimateResponse> {
-    const originAddress =
-      dto.start.address?.trim() || dto.start.label.trim();
-    const destinationAddress =
-      dto.end.address?.trim() || dto.end.label.trim();
-    const routeKey = this.buildRouteKey(dto);
+    const segments = this.buildSegments(dto);
+    let totalKm = 0;
+
+    for (const seg of segments) {
+      const km = await this.lookupDistanceKm(seg);
+      totalKm += km;
+    }
+
+    const durationSeconds = Math.max(
+      60,
+      Math.round((totalKm / AVG_SPEED_KMH) * 3600),
+    );
+
+    return {
+      cached: true,
+      distanceKm: totalKm,
+      durationSeconds,
+      encodedPolyline: null,
+      fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
+      toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),
+    };
+  }
+
+  private buildSegments(dto: EstimateRouteDto): Segment[] {
+    const waypoints: Array<{ district: string; province: string }> = [
+      { district: dto.startDistrict, province: dto.startProvince },
+      ...(dto.intermediates ?? []),
+      { district: dto.endDistrict, province: dto.endProvince },
+    ];
+
+    const segments: Segment[] = [];
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const a = waypoints[i];
+      const b = waypoints[i + 1];
+      segments.push({
+        originProvince: a.province,
+        originDistrict: a.district,
+        destProvince: b.province,
+        destDistrict: b.district,
+      });
+    }
+    return segments;
+  }
+
+  private async lookupDistanceKm(seg: Segment): Promise<number> {
+    const op = this.norm(seg.originProvince);
+    const od = this.norm(seg.originDistrict);
+    const dp = this.norm(seg.destProvince);
+    const dd = this.norm(seg.destDistrict);
 
     try {
-      const cached = await this.prisma.routeDistanceCache.findUnique({
-        where: { routeKey },
-      });
+      const rows = await this.prisma.$queryRaw<
+        Array<{ distance_km: string | number }>
+      >`
+        SELECT distance_km
+        FROM public.district_distances
+        WHERE origin_province_norm = ${op}
+          AND origin_district_norm = ${od}
+          AND dest_province_norm = ${dp}
+          AND dest_district_norm = ${dd}
+        LIMIT 1
+      `;
 
-      if (cached) {
-        await this.prisma.routeDistanceCache.update({
-          where: { routeKey },
-          data: {
-            lastUsedAt: new Date(),
-            hitCount: { increment: 1 },
-          },
-        });
-
-        return this.toResponse(cached, true, dto);
+      const row = rows[0];
+      if (!row) {
+        throw new NotFoundException(
+          `Bu güzergah tabloda yok: ${seg.originDistrict}/${seg.originProvince} → ` +
+            `${seg.destDistrict}/${seg.destProvince}. XLS import kontrol edin.`,
+        );
       }
 
-      const osrm = await this.fetchFromOsrm(dto);
-
-      const again = await this.prisma.routeDistanceCache.findUnique({
-        where: { routeKey },
-      });
-
-      if (!again) {
-        await this.prisma.routeDistanceCache.create({
-          data: {
-            routeKey,
-            startProvince: '-',
-            startDistrict: '-',
-            endProvince: '-',
-            endDistrict: '-',
-            originAddress,
-            destinationAddress,
-            originLat: dto.start.lat,
-            originLng: dto.start.lng,
-            destinationLat: dto.end.lat,
-            destinationLng: dto.end.lng,
-            distanceMeters: osrm.distanceMeters,
-            durationSeconds: osrm.durationSeconds,
-            encodedPolyline: osrm.encodedPolyline,
-          },
-        });
+      const km = Number(row.distance_km);
+      if (!Number.isFinite(km) || km < 0) {
+        throw new NotFoundException('Geçersiz mesafe kaydı.');
       }
-
-      return {
-        cached: false,
-        distanceKm: osrm.distanceMeters / 1000,
-        durationSeconds: osrm.durationSeconds,
-        encodedPolyline: osrm.encodedPolyline,
-        fromLabel: dto.start.label.trim(),
-        toLabel: dto.end.label.trim(),
-      };
+      return km;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes('route_distance_cache')) {
+      if (msg.includes('district_distances')) {
         throw new ServiceUnavailableException(
-          'route_distance_cache tablosu yok. database/logimap/010_route_distance_cache.sql çalıştırın.',
+          'district_distances tablosu yok. Önce 013_district_distances.sql çalıştırın, sonra XLS import edin.',
         );
       }
       throw err;
     }
   }
 
-  private toResponse(
-    row: {
-      distanceMeters: number;
-      durationSeconds: number;
-      encodedPolyline: string | null;
-    },
-    cached: boolean,
-    dto: EstimateRouteDto,
-  ): RouteEstimateResponse {
-    return {
-      cached,
-      distanceKm: row.distanceMeters / 1000,
-      durationSeconds: row.durationSeconds,
-      encodedPolyline: row.encodedPolyline,
-      fromLabel: dto.start.label.trim(),
-      toLabel: dto.end.label.trim(),
-    };
+  /** Uygulama (Adana) ve XLS (ADANA) ile uyumlu. */
+  norm(value: string): string {
+    return value.trim().toLocaleUpperCase('tr-TR');
   }
 
-  private coordKey(lat: number, lng: number): string {
-    return `${lat.toFixed(5)},${lng.toFixed(5)}`;
-  }
-
-  buildRouteKey(dto: EstimateRouteDto): string {
-    const segments: string[] = [this.pointKey(dto.start)];
-
-    for (const w of dto.intermediates ?? []) {
-      segments.push(this.pointKey(w));
-    }
-
-    segments.push(this.pointKey(dto.end));
-
-    return createHash('sha256').update(segments.join('->')).digest('hex');
-  }
-
-  private pointKey(p: RoutePointDto): string {
-    return this.coordKey(p.lat, p.lng);
-  }
-
-  /** OSRM koordinat sırası: lon,lat */
-  private buildOsrmCoordinatePath(dto: EstimateRouteDto): string {
-    const points: RoutePointDto[] = [
-      dto.start,
-      ...(dto.intermediates ?? []),
-      dto.end,
-    ];
-    return points.map((p) => `${p.lng},${p.lat}`).join(';');
-  }
-
-  private async fetchFromOsrm(dto: EstimateRouteDto): Promise<{
-    distanceMeters: number;
-    durationSeconds: number;
-    encodedPolyline: string | null;
-  }> {
-    const base = this.osrmBaseUrl();
-    const path = this.buildOsrmCoordinatePath(dto);
-    const url =
-      `${base}/route/v1/driving/${path}` +
-      '?overview=full&geometries=polyline&alternatives=false&steps=false';
-
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-    });
-
-    const text = await res.text();
-    if (!res.ok) {
-      throw new BadGatewayException(
-        `OSRM rota hatası (${res.status}): ${text.slice(0, 300)}`,
-      );
-    }
-
-    const json = JSON.parse(text) as {
-      code?: string;
-      message?: string;
-      routes?: Array<{
-        distance?: number;
-        duration?: number;
-        geometry?: string;
-      }>;
-    };
-
-    if (json.code && json.code !== 'Ok') {
-      throw new BadGatewayException(
-        `OSRM: ${json.message ?? json.code}`,
-      );
-    }
-
-    const route = json.routes?.[0];
-    const distance = route?.distance;
-    const duration = route?.duration;
-
-    if (distance == null || duration == null) {
-      throw new BadGatewayException('OSRM yanıtı eksik (mesafe/süre).');
-    }
-
-    return {
-      distanceMeters: Math.round(distance),
-      durationSeconds: Math.round(duration),
-      encodedPolyline: route?.geometry ?? null,
-    };
+  private placeLabel(district: string, province: string): string {
+    const d = district.trim();
+    const p = province.trim();
+    if (!d) return p;
+    if (!p) return d;
+    return `${d}/${p}`;
   }
 }

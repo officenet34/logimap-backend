@@ -8,7 +8,7 @@ import { RoutesService } from './routes.service';
 export class RoutesController {
   constructor(private readonly routes: RoutesService) {}
 
-  /** Nakliye mesafe/süre — önce DB önbellek, yoksa Google Routes API. */
+  /** Nakliye mesafe/süre — district_distances tablosu (XLS import). */
   @Post('estimate')
   estimate(@Body() dto: EstimateRouteDto) {
     return this.routes.estimate(dto);

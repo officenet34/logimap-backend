@@ -1,36 +1,18 @@
 import { Controller, Get } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('health')
 export class HealthController {
-  constructor(
-    private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
   @Get()
   async check() {
-    const osrmBase =
-      this.config.get<string>('OSRM_BASE_URL')?.trim() ||
-      'https://router.project-osrm.org';
-    const nominatimBase =
-      this.config.get<string>('NOMINATIM_BASE_URL')?.trim() ||
-      'https://nominatim.openstreetmap.org';
-
-    let routeCacheTable = false;
-    let addressCacheTable = false;
+    let districtDistancesTable = false;
     try {
-      await this.prisma.$queryRaw`SELECT 1 FROM route_distance_cache LIMIT 1`;
-      routeCacheTable = true;
+      await this.prisma.$queryRaw`SELECT 1 FROM district_distances LIMIT 1`;
+      districtDistancesTable = true;
     } catch {
-      routeCacheTable = false;
-    }
-    try {
-      await this.prisma.$queryRaw`SELECT 1 FROM address_geocode_cache LIMIT 1`;
-      addressCacheTable = true;
-    } catch {
-      addressCacheTable = false;
+      districtDistancesTable = false;
     }
 
     try {
@@ -43,12 +25,9 @@ export class HealthController {
         version: '1.0.0',
         database: rows[0]?.db ?? 'unknown',
         dbConnected: true,
-        routingProvider: 'osrm',
-        geocodingProvider: 'nominatim',
-        osrmBaseUrl: osrmBase,
-        nominatimBaseUrl: nominatimBase,
-        routeCacheTable,
-        addressCacheTable,
+        routingProvider: 'district_distances',
+        geocodingProvider: null,
+        districtDistancesTable,
       };
     } catch {
       return {
@@ -57,12 +36,9 @@ export class HealthController {
         version: '1.0.0',
         database: 'unreachable',
         dbConnected: false,
-        routingProvider: 'osrm',
-        geocodingProvider: 'nominatim',
-        osrmBaseUrl: osrmBase,
-        nominatimBaseUrl: nominatimBase,
-        routeCacheTable,
-        addressCacheTable,
+        routingProvider: 'district_distances',
+        geocodingProvider: null,
+        districtDistancesTable,
         hint: 'Coolify Postgres internal URL ve aynı Docker ağı kontrol edin',
       };
     }

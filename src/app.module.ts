@@ -9,7 +9,6 @@ import { VehiclesModule } from './vehicles/vehicles.module';
 import { MediaModule } from './media/media.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { RoutesModule } from './routes/routes.module';
-import { PlacesModule } from './places/places.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -24,7 +23,6 @@ import { PrismaModule } from './prisma/prisma.module';
     PushModule,
     VehiclesModule,
     RoutesModule,
-    PlacesModule,
   ],
   controllers: [HealthController],
 })
