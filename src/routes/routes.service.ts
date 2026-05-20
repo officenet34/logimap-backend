@@ -9,6 +9,12 @@ import { EstimateRouteDto } from './dto/estimate-route.dto';
 /** XLS tablosundan süre tahmini (km başına ortalama kamyon hızı). */
 const AVG_SPEED_KMH = 70;
 
+/** Excel/DB il adı ↔ uygulama (tr_locations.json). */
+const PROVINCE_ALIAS_GROUPS: readonly string[][] = [
+  ['AFYON', 'AFYONKARAHİSAR', 'AFYONKARAHISAR'],
+  ['K.MARAŞ', 'K.MARAS', 'KAHRAMANMARAŞ', 'KAHRAMANMARAS'],
+];
+
 export type RouteEstimateResponse = {
   cached: boolean;
   distanceKm: number;
@@ -75,35 +81,38 @@ export class RoutesService {
   }
 
   private async lookupDistanceKm(seg: Segment): Promise<number> {
-    const op = this.norm(seg.originProvince);
+    const opKeys = this.provinceLookupKeys(seg.originProvince);
     const od = this.norm(seg.originDistrict);
-    const dp = this.norm(seg.destProvince);
+    const dpKeys = this.provinceLookupKeys(seg.destProvince);
     const dd = this.norm(seg.destDistrict);
 
     try {
-      const rows = await this.prisma.$queryRaw<Array<{ km: string | number }>>`
-        SELECT km
-        FROM public.district_distances
-        WHERE upper(trim(kalkis_il)) = ${op}
-          AND upper(trim(kalkis_ilce)) = ${od}
-          AND upper(trim(varis_il)) = ${dp}
-          AND upper(trim(varis_ilce)) = ${dd}
-        LIMIT 1
-      `;
-
-      const row = rows[0];
-      if (!row) {
-        throw new NotFoundException(
-          `Bu güzergah tabloda yok: ${seg.originDistrict}/${seg.originProvince} → ` +
-            `${seg.destDistrict}/${seg.destProvince}.`,
-        );
+      for (const op of opKeys) {
+        for (const dp of dpKeys) {
+          const rows = await this.prisma.$queryRaw<Array<{ km: string | number }>>`
+            SELECT km
+            FROM public.district_distances
+            WHERE upper(trim(kalkis_il)) = ${op}
+              AND upper(trim(kalkis_ilce)) = ${od}
+              AND upper(trim(varis_il)) = ${dp}
+              AND upper(trim(varis_ilce)) = ${dd}
+            LIMIT 1
+          `;
+          const row = rows[0];
+          if (row) {
+            const km = Number(row.km);
+            if (!Number.isFinite(km) || km < 0) {
+              throw new NotFoundException('Geçersiz mesafe kaydı.');
+            }
+            return km;
+          }
+        }
       }
 
-      const km = Number(row.km);
-      if (!Number.isFinite(km) || km < 0) {
-        throw new NotFoundException('Geçersiz mesafe kaydı.');
-      }
-      return km;
+      throw new NotFoundException(
+        `Bu güzergah tabloda yok: ${seg.originDistrict}/${seg.originProvince} → ` +
+          `${seg.destDistrict}/${seg.destProvince}.`,
+      );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('district_distances')) {
@@ -120,6 +129,18 @@ export class RoutesService {
     return value.trim().toLocaleUpperCase('tr-TR');
   }
 
+  private provinceLookupKeys(province: string): string[] {
+    const n = this.norm(province);
+    const keys = new Set<string>([n]);
+    for (const group of PROVINCE_ALIAS_GROUPS) {
+      const normalized = group.map((g) => this.norm(g));
+      if (normalized.includes(n)) {
+        normalized.forEach((k) => keys.add(k));
+      }
+    }
+    return [...keys];
+  }
+
   private placeLabel(district: string, province: string): string {
     const d = district.trim();
     const p = province.trim();
@@ -128,3 +149,4 @@ export class RoutesService {
     return `${d}/${p}`;
   }
 }
+
