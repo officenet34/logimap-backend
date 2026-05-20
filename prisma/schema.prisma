@@ -399,8 +399,6 @@ model DistrictDistance {
   distanceKm           Decimal  @map("distance_km") @db.Decimal(10, 2)
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@unique([originProvinceNorm, originDistrictNorm, destProvinceNorm, destDistrictNorm], map: "district_distances_route_key")
-  @@index([originProvinceNorm, originDistrictNorm], map: "idx_district_distances_origin")
-  @@index([destProvinceNorm, destDistrictNorm], map: "idx_district_distances_dest")
+  @@index([originProvinceNorm, originDistrictNorm, destProvinceNorm, destDistrictNorm], map: "idx_district_distances_lookup")
   @@map("district_distances")
 }

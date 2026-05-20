@@ -1,11 +1,9 @@
 /**
  * Excel/CSV → district_distances (Prisma + xlsx)
  *
- *   cd backend
- *   npm install
  *   npm run import:distances -- /tmp/mesafeler.xlsx
  *
- * DATABASE_URL .env veya ortam değişkeninden okunur.
+ * Tekrarlı kayıt: tablo UNIQUE'siz; Excel'deki çiftler script'te birleştirilir.
  */
 import { PrismaClient, Prisma } from '@prisma/client';
 import * as fs from 'fs';
@@ -15,8 +13,41 @@ import * as XLSX from 'xlsx';
 const prisma = new PrismaClient();
 const BATCH = 5000;
 
+const RESET_DDL = `
+DROP TABLE IF EXISTS public.district_distances CASCADE;
+
+CREATE TABLE public.district_distances (
+    id UUID NOT NULL DEFAULT gen_random_uuid(),
+    origin_province TEXT NOT NULL,
+    origin_district TEXT NOT NULL,
+    dest_province TEXT NOT NULL,
+    dest_district TEXT NOT NULL,
+    origin_province_norm TEXT NOT NULL,
+    origin_district_norm TEXT NOT NULL,
+    dest_province_norm TEXT NOT NULL,
+    dest_district_norm TEXT NOT NULL,
+    distance_km NUMERIC(10, 2) NOT NULL,
+    created_at TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT district_distances_pkey PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_district_distances_lookup ON public.district_distances (
+    origin_province_norm, origin_district_norm,
+    dest_province_norm, dest_district_norm
+);
+`;
+
 function norm(value: string): string {
   return value.trim().toLocaleUpperCase('tr-TR');
+}
+
+function routeKey(r: {
+  originProvinceNorm: string;
+  originDistrictNorm: string;
+  destProvinceNorm: string;
+  destDistrictNorm: string;
+}): string {
+  return `${r.originProvinceNorm}|${r.originDistrictNorm}|${r.destProvinceNorm}|${r.destDistrictNorm}`;
 }
 
 function isHeaderRow(cells: unknown[]): boolean {
@@ -102,6 +133,17 @@ function readCsv(filePath: string): Prisma.DistrictDistanceCreateManyInput[] {
   return out;
 }
 
+/** Aynı güzergah birden fazla satırdaysa son km değeri kalır. */
+function dedupe(
+  records: Prisma.DistrictDistanceCreateManyInput[],
+): Prisma.DistrictDistanceCreateManyInput[] {
+  const map = new Map<string, Prisma.DistrictDistanceCreateManyInput>();
+  for (const r of records) {
+    map.set(routeKey(r), r);
+  }
+  return [...map.values()];
+}
+
 async function main(): Promise<void> {
   const fileArg = process.argv[2];
   if (!fileArg) {
@@ -118,41 +160,20 @@ async function main(): Promise<void> {
   const ext = path.extname(filePath).toLowerCase();
   console.log('Dosya:', filePath);
 
-  const records =
+  const raw =
     ext === '.csv' ? readCsv(filePath) : readXlsx(filePath);
 
-  if (records.length === 0) {
+  if (raw.length === 0) {
     console.error('Hiç satır okunamadı');
     process.exit(1);
   }
 
-  console.log(`Okunan: ${records.length} satır`);
+  const records = dedupe(raw);
+  const dupes = raw.length - records.length;
+  console.log(`Okunan: ${raw.length} satır (${dupes} tekrar birleştirildi → ${records.length})`);
 
-  await prisma.$executeRawUnsafe(`
-    CREATE TABLE IF NOT EXISTS public.district_distances (
-      id UUID NOT NULL DEFAULT gen_random_uuid(),
-      origin_province TEXT NOT NULL,
-      origin_district TEXT NOT NULL,
-      dest_province TEXT NOT NULL,
-      dest_district TEXT NOT NULL,
-      origin_province_norm TEXT NOT NULL,
-      origin_district_norm TEXT NOT NULL,
-      dest_province_norm TEXT NOT NULL,
-      dest_district_norm TEXT NOT NULL,
-      distance_km NUMERIC(10, 2) NOT NULL,
-      created_at TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT district_distances_pkey PRIMARY KEY (id)
-    );
-  `);
-  await prisma.$executeRawUnsafe(`
-    CREATE UNIQUE INDEX IF NOT EXISTS district_distances_route_key
-      ON public.district_distances (
-        origin_province_norm, origin_district_norm,
-        dest_province_norm, dest_district_norm
-      );
-  `);
-
-  await prisma.districtDistance.deleteMany();
+  console.log('Tablo sıfırlanıyor (UNIQUE yok)...');
+  await prisma.$executeRawUnsafe(RESET_DDL);
 
   for (let i = 0; i < records.length; i += BATCH) {
     const chunk = records.slice(i, i + BATCH);

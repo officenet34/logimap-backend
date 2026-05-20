@@ -90,6 +90,7 @@ export class RoutesService {
           AND origin_district_norm = ${od}
           AND dest_province_norm = ${dp}
           AND dest_district_norm = ${dd}
+        ORDER BY created_at DESC
         LIMIT 1
       `;
 
