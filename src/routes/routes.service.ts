@@ -211,6 +211,16 @@ export class RoutesService {
       } catch {
         /* ignore */
       }
+      if (
+        res.status === 403 &&
+        (detail.includes('Android client') || detail.includes('blocked'))
+      ) {
+        throw new BadGatewayException(
+          'Google Routes 403: Coolify GOOGLE_ROUTES_API_KEY Android uygulama kısıtlı. ' +
+            'Google Cloud\'da sunucu için YENİ anahtar oluşturun (Uygulama kısıtı: Yok, API: Routes API). ' +
+            'Harita anahtarı ile aynı anahtarı kullanmayın.',
+        );
+      }
       throw new BadGatewayException(
         `Google Routes hatası (${res.status}): ${detail}`,
       );
