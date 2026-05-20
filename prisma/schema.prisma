@@ -385,20 +385,3 @@ model RouteDistanceCache {
   @@map("route_distance_cache")
 }
 
-/// İl/ilçe mesafe tablosu (XLS import — nakliye rota mesafesi).
-model DistrictDistance {
-  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  originProvince       String   @map("origin_province")
-  originDistrict       String   @map("origin_district")
-  destProvince         String   @map("dest_province")
-  destDistrict         String   @map("dest_district")
-  originProvinceNorm   String   @map("origin_province_norm")
-  originDistrictNorm   String   @map("origin_district_norm")
-  destProvinceNorm     String   @map("dest_province_norm")
-  destDistrictNorm     String   @map("dest_district_norm")
-  distanceKm           Decimal  @map("distance_km") @db.Decimal(10, 2)
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@index([originProvinceNorm, originDistrictNorm, destProvinceNorm, destDistrictNorm], map: "idx_district_distances_lookup")
-  @@map("district_distances")
-}

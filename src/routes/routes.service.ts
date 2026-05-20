@@ -81,16 +81,13 @@ export class RoutesService {
     const dd = this.norm(seg.destDistrict);
 
     try {
-      const rows = await this.prisma.$queryRaw<
-        Array<{ distance_km: string | number }>
-      >`
-        SELECT distance_km
+      const rows = await this.prisma.$queryRaw<Array<{ km: string | number }>>`
+        SELECT km
         FROM public.district_distances
-        WHERE origin_province_norm = ${op}
-          AND origin_district_norm = ${od}
-          AND dest_province_norm = ${dp}
-          AND dest_district_norm = ${dd}
-        ORDER BY created_at DESC
+        WHERE upper(trim(kalkis_il)) = ${op}
+          AND upper(trim(kalkis_ilce)) = ${od}
+          AND upper(trim(varis_il)) = ${dp}
+          AND upper(trim(varis_ilce)) = ${dd}
         LIMIT 1
       `;
 
@@ -98,11 +95,11 @@ export class RoutesService {
       if (!row) {
         throw new NotFoundException(
           `Bu güzergah tabloda yok: ${seg.originDistrict}/${seg.originProvince} → ` +
-            `${seg.destDistrict}/${seg.destProvince}. XLS import kontrol edin.`,
+            `${seg.destDistrict}/${seg.destProvince}.`,
         );
       }
 
-      const km = Number(row.distance_km);
+      const km = Number(row.km);
       if (!Number.isFinite(km) || km < 0) {
         throw new NotFoundException('Geçersiz mesafe kaydı.');
       }
@@ -111,7 +108,7 @@ export class RoutesService {
       const msg = err instanceof Error ? err.message : String(err);
       if (msg.includes('district_distances')) {
         throw new ServiceUnavailableException(
-          'district_distances tablosu yok. Önce 013_district_distances.sql çalıştırın, sonra XLS import edin.',
+          'district_distances tablosu yok. database/logimap/district_distances.sql çalıştırın.',
         );
       }
       throw err;
