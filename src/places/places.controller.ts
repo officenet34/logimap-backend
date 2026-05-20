@@ -8,13 +8,13 @@ import { PlacesService } from './places.service';
 export class PlacesController {
   constructor(private readonly places: PlacesService) {}
 
-  /** Adres yazarken öneriler — önce DB, eksikse Google Places. */
+  /** Adres yazarken öneriler — önce DB, eksikse Nominatim (OSM). */
   @Get('autocomplete')
   autocomplete(@Query('q') q?: string) {
     return this.places.autocomplete(q ?? '');
   }
 
-  /** Seçilen placeId → koordinat (önce DB, yoksa Google → DB kayıt). */
+  /** Seçilen adres → koordinat DB kayıt. */
   @Post('resolve')
   resolve(@Body() dto: ResolvePlaceDto) {
     const coords =

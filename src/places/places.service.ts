@@ -6,8 +6,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
-/** Komoot Photon — OSM tabanlı adres arama (ücretsiz, VDS üzerinden). */
-const DEFAULT_PHOTON_BASE = 'https://photon.komoot.io';
+/** Nominatim — OSM adres arama (Türkçe uyumlu, ücretsiz, VDS üzerinden). */
+const DEFAULT_NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
 
 export type PlaceSuggestion = {
   placeId: string | null;
@@ -27,23 +27,48 @@ export type ResolvedPlace = {
   fromCache: boolean;
 };
 
-type PhotonFeature = {
-  geometry?: { coordinates?: [number, number] };
-  properties?: Record<string, unknown>;
+type NominatimAddress = {
+  road?: string;
+  house_number?: string;
+  suburb?: string;
+  town?: string;
+  city?: string;
+  village?: string;
+  county?: string;
+  state?: string;
+  country?: string;
+};
+
+type NominatimResult = {
+  place_id?: number;
+  lat?: string;
+  lon?: string;
+  display_name?: string;
+  address?: NominatimAddress;
 };
 
 @Injectable()
 export class PlacesService {
+  /** Nominatim kullanım politikası: en fazla ~1 istek/saniye (public sunucu). */
+  private static lastNominatimAt = 0;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
 
-  photonBaseUrl(): string {
+  nominatimBaseUrl(): string {
     const raw =
-      this.config.get<string>('PHOTON_BASE_URL')?.trim() ||
-      DEFAULT_PHOTON_BASE;
+      this.config.get<string>('NOMINATIM_BASE_URL')?.trim() ||
+      DEFAULT_NOMINATIM_BASE;
     return raw.replace(/\/$/, '');
+  }
+
+  private nominatimUserAgent(): string {
+    return (
+      this.config.get<string>('NOMINATIM_USER_AGENT')?.trim() ||
+      'LogiMap/1.0 (https://logimap.com.tr; destek@logimap.com.tr)'
+    );
   }
 
   normalizeSearchKey(query: string): string {
@@ -73,22 +98,18 @@ export class PlacesService {
       return merged.slice(0, 8);
     }
 
-    const fromPhoton = await this.fetchAutocompleteFromPhoton(q);
-    for (const p of fromPhoton) {
-      const key = p.placeId ?? p.formattedAddress;
+    const fromNominatim = await this.fetchAutocompleteFromNominatim(q);
+    for (const item of fromNominatim) {
+      const key = item.placeId ?? item.formattedAddress;
       if (seen.has(key)) continue;
       seen.add(key);
-      merged.push(p);
+      merged.push(item);
       if (merged.length >= 8) break;
     }
 
     return merged;
   }
 
-  /**
-   * Seçilen adresi DB'ye yazar.
-   * Photon önerisinde lat/lng varsa doğrudan kaydedilir (ek API yok).
-   */
   async resolve(
     placeId: string,
     coords?: {
@@ -217,48 +238,70 @@ export class PlacesService {
     });
   }
 
-  private async fetchAutocompleteFromPhoton(
+  private async waitNominatimRateLimit(): Promise<void> {
+    const minGapMs = 1100;
+    const now = Date.now();
+    const wait = PlacesService.lastNominatimAt + minGapMs - now;
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    PlacesService.lastNominatimAt = Date.now();
+  }
+
+  private async fetchAutocompleteFromNominatim(
     input: string,
   ): Promise<PlaceSuggestion[]> {
-    const base = this.photonBaseUrl();
+    await this.waitNominatimRateLimit();
+
+    const base = this.nominatimBaseUrl();
     const params = new URLSearchParams({
       q: input,
-      lang: 'tr',
+      format: 'json',
+      addressdetails: '1',
       limit: '8',
-      bbox: '25.66,35.81,44.82,42.11',
+      countrycodes: 'tr',
     });
 
-    const res = await fetch(`${base}/api/?${params.toString()}`, {
+    const res = await fetch(`${base}/search?${params.toString()}`, {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'tr',
+        'User-Agent': this.nominatimUserAgent(),
+      },
     });
 
     const text = await res.text();
     if (!res.ok) {
       throw new BadGatewayException(
-        `Photon adres arama hatası (${res.status}): ${text.slice(0, 300)}`,
+        `Nominatim adres arama hatası (${res.status}): ${text.slice(0, 300)}`,
       );
     }
 
-    const json = JSON.parse(text) as { features?: PhotonFeature[] };
+    const json = JSON.parse(text) as NominatimResult[];
+    if (!Array.isArray(json)) return [];
+
     const out: PlaceSuggestion[] = [];
 
-    for (const f of json.features ?? []) {
-      const coords = f.geometry?.coordinates;
-      if (!coords || coords.length < 2) continue;
+    for (const row of json) {
+      const lat = Number.parseFloat(row.lat ?? '');
+      const lng = Number.parseFloat(row.lon ?? '');
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
 
-      const lng = coords[0];
-      const lat = coords[1];
-      const props = f.properties ?? {};
-      const { displayLabel, formattedAddress } = this.formatPhotonAddress(props);
-      const placeId = this.photonPlaceId(props);
+      const formatted = row.display_name?.trim() ?? '';
+      const { displayLabel } = this.formatNominatimAddress(
+        formatted,
+        row.address,
+      );
+      const placeId =
+        row.place_id != null ? `nominatim:${row.place_id}` : null;
 
-      if (!displayLabel) continue;
+      if (!displayLabel && !formatted) continue;
 
       out.push({
         placeId,
-        displayLabel,
-        formattedAddress,
+        displayLabel: displayLabel || formatted,
+        formattedAddress: formatted || displayLabel,
         latitude: lat,
         longitude: lng,
         fromCache: false,
@@ -268,31 +311,14 @@ export class PlacesService {
     return out;
   }
 
-  private photonPlaceId(props: Record<string, unknown>): string {
-    const osmType = props.osm_type?.toString();
-    const osmId = props.osm_id?.toString();
-    if (osmType && osmId) return `osm:${osmType}:${osmId}`;
-    const name = props.name?.toString() ?? 'place';
-    const lat = props.lat?.toString() ?? '';
-    const lon = props.lon?.toString() ?? '';
-    return `photon:${name}:${lat}:${lon}`;
-  }
-
-  private formatPhotonAddress(props: Record<string, unknown>): {
-    displayLabel: string;
-    formattedAddress: string;
-  } {
-    const name = props.name?.toString()?.trim();
-    const street = props.street?.toString()?.trim();
-    const housenumber = props.housenumber?.toString()?.trim();
-    const district =
-      props.district?.toString()?.trim() ||
-      props.county?.toString()?.trim();
-    const city =
-      props.city?.toString()?.trim() ||
-      props.locality?.toString()?.trim();
-    const state = props.state?.toString()?.trim();
-    const country = props.country?.toString()?.trim();
+  private formatNominatimAddress(
+    displayName: string,
+    addr?: NominatimAddress,
+  ): { displayLabel: string; formattedAddress: string } {
+    if (!addr) {
+      const short = this.shortDisplayName(displayName);
+      return { displayLabel: short, formattedAddress: displayName || short };
+    }
 
     const parts: string[] = [];
     const seen = new Set<string>();
@@ -304,26 +330,28 @@ export class PlacesService {
       parts.push(v);
     };
 
-    if (street) {
-      add(housenumber ? `${street} ${housenumber}` : street);
-    } else if (name) {
-      add(name);
+    if (addr.road) {
+      add(
+        addr.house_number
+          ? `${addr.road} ${addr.house_number}`
+          : addr.road,
+      );
     }
-    add(district);
-    add(city);
-    add(state);
-    if (country && country.toLowerCase() !== 'türkiye') {
-      add(country);
-    }
+    add(addr.suburb);
+    add(addr.town ?? addr.village ?? addr.city);
+    add(addr.county);
+    add(addr.state);
 
-    const formatted = parts.join(', ');
-    const display =
-      formatted ||
-      name ||
-      city ||
-      state ||
-      'Adres';
+    const formatted = parts.join(', ') || displayName;
+    const display = formatted || this.shortDisplayName(displayName);
 
-    return { displayLabel: display, formattedAddress: formatted || display };
+    return { displayLabel: display, formattedAddress: formatted };
+  }
+
+  /** Uzun display_name → kısa etiket (liste görünümü). */
+  private shortDisplayName(full: string): string {
+    const parts = full.split(',').map((p) => p.trim()).filter(Boolean);
+    if (parts.length <= 3) return full;
+    return parts.slice(0, 3).join(', ');
   }
 }

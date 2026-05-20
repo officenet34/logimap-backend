@@ -15,7 +15,7 @@ export class ResolvePlaceDto {
   @MaxLength(256)
   placeId!: string;
 
-  /** Photon seçiminde zaten gelen koordinatlar (DB kayıt, ek API yok). */
+  /** Nominatim seçiminde zaten gelen koordinatlar (DB kayıt, ek API yok). */
   @IsOptional()
   @IsNumber()
   @Min(-90)

@@ -14,9 +14,9 @@ export class HealthController {
     const osrmBase =
       this.config.get<string>('OSRM_BASE_URL')?.trim() ||
       'https://router.project-osrm.org';
-    const photonBase =
-      this.config.get<string>('PHOTON_BASE_URL')?.trim() ||
-      'https://photon.komoot.io';
+    const nominatimBase =
+      this.config.get<string>('NOMINATIM_BASE_URL')?.trim() ||
+      'https://nominatim.openstreetmap.org';
 
     let routeCacheTable = false;
     let addressCacheTable = false;
@@ -44,9 +44,9 @@ export class HealthController {
         database: rows[0]?.db ?? 'unknown',
         dbConnected: true,
         routingProvider: 'osrm',
-        geocodingProvider: 'photon',
+        geocodingProvider: 'nominatim',
         osrmBaseUrl: osrmBase,
-        photonBaseUrl: photonBase,
+        nominatimBaseUrl: nominatimBase,
         routeCacheTable,
         addressCacheTable,
       };
@@ -58,9 +58,9 @@ export class HealthController {
         database: 'unreachable',
         dbConnected: false,
         routingProvider: 'osrm',
-        geocodingProvider: 'photon',
+        geocodingProvider: 'nominatim',
         osrmBaseUrl: osrmBase,
-        photonBaseUrl: photonBase,
+        nominatimBaseUrl: nominatimBase,
         routeCacheTable,
         addressCacheTable,
         hint: 'Coolify Postgres internal URL ve aynı Docker ağı kontrol edin',
