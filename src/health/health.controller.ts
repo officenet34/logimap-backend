@@ -11,9 +11,12 @@ export class HealthController {
 
   @Get()
   async check() {
-    const routesKey = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ?? '';
-    const routesConfigured =
-      routesKey.length > 0 && !routesKey.includes('BURAYA_ROUTES');
+    const osrmBase =
+      this.config.get<string>('OSRM_BASE_URL')?.trim() ||
+      'https://router.project-osrm.org';
+    const photonBase =
+      this.config.get<string>('PHOTON_BASE_URL')?.trim() ||
+      'https://photon.komoot.io';
 
     let routeCacheTable = false;
     let addressCacheTable = false;
@@ -40,7 +43,10 @@ export class HealthController {
         version: '1.0.0',
         database: rows[0]?.db ?? 'unknown',
         dbConnected: true,
-        routesConfigured,
+        routingProvider: 'osrm',
+        geocodingProvider: 'photon',
+        osrmBaseUrl: osrmBase,
+        photonBaseUrl: photonBase,
         routeCacheTable,
         addressCacheTable,
       };
@@ -51,7 +57,10 @@ export class HealthController {
         version: '1.0.0',
         database: 'unreachable',
         dbConnected: false,
-        routesConfigured,
+        routingProvider: 'osrm',
+        geocodingProvider: 'photon',
+        osrmBaseUrl: osrmBase,
+        photonBaseUrl: photonBase,
         routeCacheTable,
         addressCacheTable,
         hint: 'Coolify Postgres internal URL ve aynı Docker ağı kontrol edin',

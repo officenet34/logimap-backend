@@ -17,6 +17,15 @@ export class PlacesController {
   /** Seçilen placeId → koordinat (önce DB, yoksa Google → DB kayıt). */
   @Post('resolve')
   resolve(@Body() dto: ResolvePlaceDto) {
-    return this.places.resolve(dto.placeId);
+    const coords =
+      dto.lat != null && dto.lng != null
+        ? {
+            lat: dto.lat,
+            lng: dto.lng,
+            displayLabel: dto.displayLabel,
+            formattedAddress: dto.formattedAddress,
+          }
+        : undefined;
+    return this.places.resolve(dto.placeId, coords);
   }
 }

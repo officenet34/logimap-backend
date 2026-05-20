@@ -9,9 +9,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EstimateRouteDto } from './dto/estimate-route.dto';
 import { RoutePointDto } from './dto/route-point.dto';
 
-const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
-const FIELD_MASK =
-  'routes.distanceMeters,routes.staticDuration,routes.polyline.encodedPolyline';
+/** OSRM — ücretsiz karayolu mesafesi (VDS veya kendi sunucunuz). */
+const DEFAULT_OSRM_BASE = 'https://router.project-osrm.org';
 
 export type RouteEstimateResponse = {
   cached: boolean;
@@ -29,9 +28,14 @@ export class RoutesService {
     private readonly config: ConfigService,
   ) {}
 
+  osrmBaseUrl(): string {
+    const raw =
+      this.config.get<string>('OSRM_BASE_URL')?.trim() || DEFAULT_OSRM_BASE;
+    return raw.replace(/\/$/, '');
+  }
+
   isRoutesConfigured(): boolean {
-    const key = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ?? '';
-    return key.length > 0 && !key.includes('BURAYA_ROUTES');
+    return this.osrmBaseUrl().length > 0;
   }
 
   async estimate(dto: EstimateRouteDto): Promise<RouteEstimateResponse> {
@@ -58,7 +62,7 @@ export class RoutesService {
         return this.toResponse(cached, true, dto);
       }
 
-      const google = await this.fetchFromGoogle(dto);
+      const osrm = await this.fetchFromOsrm(dto);
 
       const again = await this.prisma.routeDistanceCache.findUnique({
         where: { routeKey },
@@ -78,18 +82,18 @@ export class RoutesService {
             originLng: dto.start.lng,
             destinationLat: dto.end.lat,
             destinationLng: dto.end.lng,
-            distanceMeters: google.distanceMeters,
-            durationSeconds: google.durationSeconds,
-            encodedPolyline: google.encodedPolyline,
+            distanceMeters: osrm.distanceMeters,
+            durationSeconds: osrm.durationSeconds,
+            encodedPolyline: osrm.encodedPolyline,
           },
         });
       }
 
       return {
         cached: false,
-        distanceKm: google.distanceMeters / 1000,
-        durationSeconds: google.durationSeconds,
-        encodedPolyline: google.encodedPolyline,
+        distanceKm: osrm.distanceMeters / 1000,
+        durationSeconds: osrm.durationSeconds,
+        encodedPolyline: osrm.encodedPolyline,
         fromLabel: dto.start.label.trim(),
         toLabel: dto.end.label.trim(),
       };
@@ -143,118 +147,67 @@ export class RoutesService {
     return this.coordKey(p.lat, p.lng);
   }
 
-  private resolveRoutesApiKey(): string {
-    const key = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ?? '';
-    if (!key || key.includes('BURAYA_ROUTES')) {
-      throw new ServiceUnavailableException(
-        'GOOGLE_ROUTES_API_KEY sunucuda tanımlı değil. Coolify ortam değişkenine Routes API anahtarını ekleyip API servisini yeniden deploy edin.',
-      );
-    }
-    return key;
+  /** OSRM koordinat sırası: lon,lat */
+  private buildOsrmCoordinatePath(dto: EstimateRouteDto): string {
+    const points: RoutePointDto[] = [
+      dto.start,
+      ...(dto.intermediates ?? []),
+      dto.end,
+    ];
+    return points.map((p) => `${p.lng},${p.lat}`).join(';');
   }
 
-  private latLng(p: RoutePointDto) {
-    return {
-      location: {
-        latLng: {
-          latitude: p.lat,
-          longitude: p.lng,
-        },
-      },
-    };
-  }
-
-  private async fetchFromGoogle(dto: EstimateRouteDto): Promise<{
+  private async fetchFromOsrm(dto: EstimateRouteDto): Promise<{
     distanceMeters: number;
     durationSeconds: number;
     encodedPolyline: string | null;
   }> {
-    const apiKey = this.resolveRoutesApiKey();
+    const base = this.osrmBaseUrl();
+    const path = this.buildOsrmCoordinatePath(dto);
+    const url =
+      `${base}/route/v1/driving/${path}` +
+      '?overview=full&geometries=polyline&alternatives=false&steps=false';
 
-    const body: Record<string, unknown> = {
-      origin: this.latLng(dto.start),
-      destination: this.latLng(dto.end),
-      travelMode: 'DRIVE',
-      routingPreference: 'TRAFFIC_UNAWARE',
-      computeAlternativeRoutes: false,
-      languageCode: 'tr-TR',
-      units: 'METRIC',
-    };
-
-    const intermediates = dto.intermediates ?? [];
-    if (intermediates.length > 0) {
-      body.intermediates = intermediates.map((w) => this.latLng(w));
-    }
-
-    const res = await fetch(ROUTES_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': FIELD_MASK,
-      },
-      body: JSON.stringify(body),
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
     });
 
     const text = await res.text();
     if (!res.ok) {
-      let detail = text.slice(0, 400);
-      try {
-        const json = JSON.parse(text) as { error?: { message?: string } };
-        if (json.error?.message) detail = json.error.message;
-      } catch {
-        /* ignore */
-      }
-      if (
-        res.status === 403 &&
-        (detail.includes('Android client') || detail.includes('blocked'))
-      ) {
-        throw new BadGatewayException(
-          'Google Routes 403: Coolify GOOGLE_ROUTES_API_KEY Android uygulama kısıtlı. ' +
-            'Google Cloud\'da sunucu için YENİ anahtar oluşturun (Uygulama kısıtı: Yok, API: Routes API).',
-        );
-      }
       throw new BadGatewayException(
-        `Google Routes hatası (${res.status}): ${detail}`,
+        `OSRM rota hatası (${res.status}): ${text.slice(0, 300)}`,
       );
     }
 
     const json = JSON.parse(text) as {
+      code?: string;
+      message?: string;
       routes?: Array<{
-        distanceMeters?: number;
-        staticDuration?: string | { seconds?: string };
-        polyline?: { encodedPolyline?: string };
+        distance?: number;
+        duration?: number;
+        geometry?: string;
       }>;
     };
 
-    const route = json.routes?.[0];
-    const distanceMeters = route?.distanceMeters;
-    const durationSeconds = this.parseDurationSeconds(route?.staticDuration);
+    if (json.code && json.code !== 'Ok') {
+      throw new BadGatewayException(
+        `OSRM: ${json.message ?? json.code}`,
+      );
+    }
 
-    if (distanceMeters == null || durationSeconds == null) {
-      throw new BadGatewayException('Google Routes yanıtı eksik (mesafe/süre).');
+    const route = json.routes?.[0];
+    const distance = route?.distance;
+    const duration = route?.duration;
+
+    if (distance == null || duration == null) {
+      throw new BadGatewayException('OSRM yanıtı eksik (mesafe/süre).');
     }
 
     return {
-      distanceMeters,
-      durationSeconds,
-      encodedPolyline: route?.polyline?.encodedPolyline ?? null,
+      distanceMeters: Math.round(distance),
+      durationSeconds: Math.round(duration),
+      encodedPolyline: route?.geometry ?? null,
     };
-  }
-
-  private parseDurationSeconds(
-    raw: string | { seconds?: string } | undefined,
-  ): number | null {
-    if (raw == null) return null;
-    if (typeof raw === 'object') {
-      const s = raw.seconds;
-      if (s != null) return this.parseDurationSeconds(s);
-      return null;
-    }
-    const text = String(raw).trim();
-    if (!text) return null;
-    const n = text.endsWith('s') ? text.slice(0, -1) : text;
-    const v = Number.parseFloat(n);
-    return Number.isFinite(v) ? Math.round(v) : null;
   }
 }

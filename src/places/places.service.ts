@@ -6,9 +6,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 
-const PLACES_AUTOCOMPLETE_URL =
-  'https://places.googleapis.com/v1/places:autocomplete';
-const PLACE_DETAILS_URL = 'https://places.googleapis.com/v1/places';
+/** Komoot Photon — OSM tabanlı adres arama (ücretsiz, VDS üzerinden). */
+const DEFAULT_PHOTON_BASE = 'https://photon.komoot.io';
 
 export type PlaceSuggestion = {
   placeId: string | null;
@@ -28,12 +27,24 @@ export type ResolvedPlace = {
   fromCache: boolean;
 };
 
+type PhotonFeature = {
+  geometry?: { coordinates?: [number, number] };
+  properties?: Record<string, unknown>;
+};
+
 @Injectable()
 export class PlacesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {}
+
+  photonBaseUrl(): string {
+    const raw =
+      this.config.get<string>('PHOTON_BASE_URL')?.trim() ||
+      DEFAULT_PHOTON_BASE;
+    return raw.replace(/\/$/, '');
+  }
 
   normalizeSearchKey(query: string): string {
     return query
@@ -62,19 +73,31 @@ export class PlacesService {
       return merged.slice(0, 8);
     }
 
-    const fromGoogle = await this.fetchAutocompleteFromGoogle(q);
-    for (const g of fromGoogle) {
-      const key = g.placeId ?? g.formattedAddress;
+    const fromPhoton = await this.fetchAutocompleteFromPhoton(q);
+    for (const p of fromPhoton) {
+      const key = p.placeId ?? p.formattedAddress;
       if (seen.has(key)) continue;
       seen.add(key);
-      merged.push(g);
+      merged.push(p);
       if (merged.length >= 8) break;
     }
 
     return merged;
   }
 
-  async resolve(placeId: string): Promise<ResolvedPlace> {
+  /**
+   * Seçilen adresi DB'ye yazar.
+   * Photon önerisinde lat/lng varsa doğrudan kaydedilir (ek API yok).
+   */
+  async resolve(
+    placeId: string,
+    coords?: {
+      lat: number;
+      lng: number;
+      displayLabel?: string;
+      formattedAddress?: string;
+    },
+  ): Promise<ResolvedPlace> {
     const pid = placeId.trim();
     if (!pid) {
       throw new ServiceUnavailableException('placeId gerekli');
@@ -102,17 +125,31 @@ export class PlacesService {
       };
     }
 
-    const google = await this.fetchPlaceDetailsFromGoogle(pid);
-    await this.upsertCache({
-      placeId: pid,
-      formattedAddress: google.formattedAddress,
-      displayLabel: google.displayLabel,
-      latitude: google.latitude,
-      longitude: google.longitude,
-      searchKey: this.normalizeSearchKey(google.displayLabel),
-    });
+    if (coords?.lat != null && coords?.lng != null) {
+      const display =
+        coords.displayLabel?.trim() || coords.formattedAddress?.trim() || pid;
+      const formatted = coords.formattedAddress?.trim() || display;
+      await this.upsertCache({
+        placeId: pid,
+        formattedAddress: formatted,
+        displayLabel: display,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        searchKey: this.normalizeSearchKey(display),
+      });
+      return {
+        placeId: pid,
+        displayLabel: display,
+        formattedAddress: formatted,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        fromCache: false,
+      };
+    }
 
-    return { ...google, placeId: pid, fromCache: false };
+    throw new BadGatewayException(
+      'Adres koordinatı eksik. Listeden tekrar seçin.',
+    );
   }
 
   private async searchCache(
@@ -132,7 +169,7 @@ export class PlacesService {
         take: 8,
       });
 
-      return rows.map((r) => ({
+      return rows.map((r: (typeof rows)[number]) => ({
         placeId: r.placeId,
         displayLabel: r.displayLabel,
         formattedAddress: r.formattedAddress,
@@ -180,118 +217,113 @@ export class PlacesService {
     });
   }
 
-  private resolveApiKey(): string {
-    const key =
-      this.config.get<string>('GOOGLE_PLACES_API_KEY')?.trim() ||
-      this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ||
-      '';
-    if (!key || key.includes('BURAYA')) {
-      throw new ServiceUnavailableException(
-        'GOOGLE_ROUTES_API_KEY veya GOOGLE_PLACES_API_KEY sunucuda tanımlı değil.',
-      );
-    }
-    return key;
-  }
-
-  private async fetchAutocompleteFromGoogle(
+  private async fetchAutocompleteFromPhoton(
     input: string,
   ): Promise<PlaceSuggestion[]> {
-    const apiKey = this.resolveApiKey();
+    const base = this.photonBaseUrl();
+    const params = new URLSearchParams({
+      q: input,
+      lang: 'tr',
+      limit: '8',
+      bbox: '25.66,35.81,44.82,42.11',
+    });
 
-    const res = await fetch(PLACES_AUTOCOMPLETE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask':
-          'suggestions.placePrediction.placeId,suggestions.placePrediction.text',
-      },
-      body: JSON.stringify({
-        input,
-        includedRegionCodes: ['tr'],
-        languageCode: 'tr',
-      }),
+    const res = await fetch(`${base}/api/?${params.toString()}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
     });
 
     const text = await res.text();
     if (!res.ok) {
       throw new BadGatewayException(
-        `Google Places autocomplete hatası (${res.status}): ${text.slice(0, 300)}`,
+        `Photon adres arama hatası (${res.status}): ${text.slice(0, 300)}`,
       );
     }
 
-    const json = JSON.parse(text) as {
-      suggestions?: Array<{
-        placePrediction?: {
-          placeId?: string;
-          text?: { text?: string };
-        };
-      }>;
-    };
-
+    const json = JSON.parse(text) as { features?: PhotonFeature[] };
     const out: PlaceSuggestion[] = [];
-    for (const s of json.suggestions ?? []) {
-      const pred = s.placePrediction;
-      const pid = pred?.placeId?.trim();
-      const label = pred?.text?.text?.trim();
-      if (!pid || !label) continue;
+
+    for (const f of json.features ?? []) {
+      const coords = f.geometry?.coordinates;
+      if (!coords || coords.length < 2) continue;
+
+      const lng = coords[0];
+      const lat = coords[1];
+      const props = f.properties ?? {};
+      const { displayLabel, formattedAddress } = this.formatPhotonAddress(props);
+      const placeId = this.photonPlaceId(props);
+
+      if (!displayLabel) continue;
+
       out.push({
-        placeId: pid,
-        displayLabel: label,
-        formattedAddress: label,
-        latitude: null,
-        longitude: null,
+        placeId,
+        displayLabel,
+        formattedAddress,
+        latitude: lat,
+        longitude: lng,
         fromCache: false,
       });
     }
+
     return out;
   }
 
-  private async fetchPlaceDetailsFromGoogle(placeId: string): Promise<{
+  private photonPlaceId(props: Record<string, unknown>): string {
+    const osmType = props.osm_type?.toString();
+    const osmId = props.osm_id?.toString();
+    if (osmType && osmId) return `osm:${osmType}:${osmId}`;
+    const name = props.name?.toString() ?? 'place';
+    const lat = props.lat?.toString() ?? '';
+    const lon = props.lon?.toString() ?? '';
+    return `photon:${name}:${lat}:${lon}`;
+  }
+
+  private formatPhotonAddress(props: Record<string, unknown>): {
     displayLabel: string;
     formattedAddress: string;
-    latitude: number;
-    longitude: number;
-  }> {
-    const apiKey = this.resolveApiKey();
-    const url = `${PLACE_DETAILS_URL}/${encodeURIComponent(placeId)}`;
+  } {
+    const name = props.name?.toString()?.trim();
+    const street = props.street?.toString()?.trim();
+    const housenumber = props.housenumber?.toString()?.trim();
+    const district =
+      props.district?.toString()?.trim() ||
+      props.county?.toString()?.trim();
+    const city =
+      props.city?.toString()?.trim() ||
+      props.locality?.toString()?.trim();
+    const state = props.state?.toString()?.trim();
+    const country = props.country?.toString()?.trim();
 
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'id,formattedAddress,location,displayName',
-      },
-    });
-
-    const text = await res.text();
-    if (!res.ok) {
-      throw new BadGatewayException(
-        `Google Place details hatası (${res.status}): ${text.slice(0, 300)}`,
-      );
-    }
-
-    const json = JSON.parse(text) as {
-      formattedAddress?: string;
-      displayName?: { text?: string };
-      location?: { latitude?: number; longitude?: number };
+    const parts: string[] = [];
+    const seen = new Set<string>();
+    const add = (v?: string) => {
+      if (!v) return;
+      const k = v.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k);
+      parts.push(v);
     };
 
-    const lat = json.location?.latitude;
-    const lng = json.location?.longitude;
-    if (lat == null || lng == null) {
-      throw new BadGatewayException('Google Place koordinatı eksik.');
+    if (street) {
+      add(housenumber ? `${street} ${housenumber}` : street);
+    } else if (name) {
+      add(name);
+    }
+    add(district);
+    add(city);
+    add(state);
+    if (country && country.toLowerCase() !== 'türkiye') {
+      add(country);
     }
 
-    const formatted = json.formattedAddress?.trim() || '';
+    const formatted = parts.join(', ');
     const display =
-      json.displayName?.text?.trim() || formatted || 'Seçilen adres';
+      formatted ||
+      name ||
+      city ||
+      state ||
+      'Adres';
 
-    return {
-      displayLabel: display,
-      formattedAddress: formatted || display,
-      latitude: lat,
-      longitude: lng,
-    };
+    return { displayLabel: display, formattedAddress: formatted || display };
   }
 }
