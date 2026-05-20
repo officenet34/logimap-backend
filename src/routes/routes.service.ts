@@ -7,6 +7,7 @@ import { ConfigService } from '@nestjs/config';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { EstimateRouteDto } from './dto/estimate-route.dto';
+import { RoutePointDto } from './dto/route-point.dto';
 
 const ROUTES_URL = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 const FIELD_MASK =
@@ -34,8 +35,10 @@ export class RoutesService {
   }
 
   async estimate(dto: EstimateRouteDto): Promise<RouteEstimateResponse> {
-    const originAddress = this.formatAddress(dto.startDistrict, dto.startProvince);
-    const destinationAddress = this.formatAddress(dto.endDistrict, dto.endProvince);
+    const originAddress =
+      dto.start.address?.trim() || dto.start.label.trim();
+    const destinationAddress =
+      dto.end.address?.trim() || dto.end.label.trim();
     const routeKey = this.buildRouteKey(dto);
 
     try {
@@ -55,11 +58,7 @@ export class RoutesService {
         return this.toResponse(cached, true, dto);
       }
 
-      const google = await this.fetchFromGoogle(
-        originAddress,
-        destinationAddress,
-        dto,
-      );
+      const google = await this.fetchFromGoogle(dto);
 
       const again = await this.prisma.routeDistanceCache.findUnique({
         where: { routeKey },
@@ -69,12 +68,16 @@ export class RoutesService {
         await this.prisma.routeDistanceCache.create({
           data: {
             routeKey,
-            startProvince: dto.startProvince.trim(),
-            startDistrict: dto.startDistrict.trim(),
-            endProvince: dto.endProvince.trim(),
-            endDistrict: dto.endDistrict.trim(),
+            startProvince: '-',
+            startDistrict: '-',
+            endProvince: '-',
+            endDistrict: '-',
             originAddress,
             destinationAddress,
+            originLat: dto.start.lat,
+            originLng: dto.start.lng,
+            destinationLat: dto.end.lat,
+            destinationLng: dto.end.lng,
             distanceMeters: google.distanceMeters,
             durationSeconds: google.durationSeconds,
             encodedPolyline: google.encodedPolyline,
@@ -87,8 +90,8 @@ export class RoutesService {
         distanceKm: google.distanceMeters / 1000,
         durationSeconds: google.durationSeconds,
         encodedPolyline: google.encodedPolyline,
-        fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
-        toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),
+        fromLabel: dto.start.label.trim(),
+        toLabel: dto.end.label.trim(),
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -106,10 +109,6 @@ export class RoutesService {
       distanceMeters: number;
       durationSeconds: number;
       encodedPolyline: string | null;
-      startDistrict: string;
-      startProvince: string;
-      endDistrict: string;
-      endProvince: string;
     },
     cached: boolean,
     dto: EstimateRouteDto,
@@ -119,39 +118,29 @@ export class RoutesService {
       distanceKm: row.distanceMeters / 1000,
       durationSeconds: row.durationSeconds,
       encodedPolyline: row.encodedPolyline,
-      fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
-      toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),
+      fromLabel: dto.start.label.trim(),
+      toLabel: dto.end.label.trim(),
     };
   }
 
-  private norm(value: string): string {
-    return value.trim().toLocaleLowerCase('tr-TR');
-  }
-
-  private formatAddress(district: string, province: string): string {
-    return `${district.trim()}, ${province.trim()}, Türkiye`;
-  }
-
-  private placeLabel(district: string, province: string): string {
-    const d = district.trim();
-    const p = province.trim();
-    if (!d) return p;
-    if (!p) return d;
-    return `${d}/${p}`;
+  private coordKey(lat: number, lng: number): string {
+    return `${lat.toFixed(5)},${lng.toFixed(5)}`;
   }
 
   buildRouteKey(dto: EstimateRouteDto): string {
-    const segments: string[] = [
-      `${this.norm(dto.startDistrict)}|${this.norm(dto.startProvince)}`,
-    ];
+    const segments: string[] = [this.pointKey(dto.start)];
 
     for (const w of dto.intermediates ?? []) {
-      segments.push(`${this.norm(w.district)}|${this.norm(w.province)}`);
+      segments.push(this.pointKey(w));
     }
 
-    segments.push(`${this.norm(dto.endDistrict)}|${this.norm(dto.endProvince)}`);
+    segments.push(this.pointKey(dto.end));
 
     return createHash('sha256').update(segments.join('->')).digest('hex');
+  }
+
+  private pointKey(p: RoutePointDto): string {
+    return this.coordKey(p.lat, p.lng);
   }
 
   private resolveRoutesApiKey(): string {
@@ -164,11 +153,18 @@ export class RoutesService {
     return key;
   }
 
-  private async fetchFromGoogle(
-    originAddress: string,
-    destinationAddress: string,
-    dto: EstimateRouteDto,
-  ): Promise<{
+  private latLng(p: RoutePointDto) {
+    return {
+      location: {
+        latLng: {
+          latitude: p.lat,
+          longitude: p.lng,
+        },
+      },
+    };
+  }
+
+  private async fetchFromGoogle(dto: EstimateRouteDto): Promise<{
     distanceMeters: number;
     durationSeconds: number;
     encodedPolyline: string | null;
@@ -176,8 +172,8 @@ export class RoutesService {
     const apiKey = this.resolveRoutesApiKey();
 
     const body: Record<string, unknown> = {
-      origin: { address: originAddress },
-      destination: { address: destinationAddress },
+      origin: this.latLng(dto.start),
+      destination: this.latLng(dto.end),
       travelMode: 'DRIVE',
       routingPreference: 'TRAFFIC_UNAWARE',
       computeAlternativeRoutes: false,
@@ -187,9 +183,7 @@ export class RoutesService {
 
     const intermediates = dto.intermediates ?? [];
     if (intermediates.length > 0) {
-      body.intermediates = intermediates.map((w) => ({
-        address: this.formatAddress(w.district, w.province),
-      }));
+      body.intermediates = intermediates.map((w) => this.latLng(w));
     }
 
     const res = await fetch(ROUTES_URL, {
@@ -217,8 +211,7 @@ export class RoutesService {
       ) {
         throw new BadGatewayException(
           'Google Routes 403: Coolify GOOGLE_ROUTES_API_KEY Android uygulama kısıtlı. ' +
-            'Google Cloud\'da sunucu için YENİ anahtar oluşturun (Uygulama kısıtı: Yok, API: Routes API). ' +
-            'Harita anahtarı ile aynı anahtarı kullanmayın.',
+            'Google Cloud\'da sunucu için YENİ anahtar oluşturun (Uygulama kısıtı: Yok, API: Routes API).',
         );
       }
       throw new BadGatewayException(

@@ -339,7 +339,27 @@ model DriverLocationLatest {
   @@map("driver_location_latest")
 }
 
-/// Nakliye rota mesafesi — Google Routes sonuç önbelleği (aynı il/ilçe çifti tekrar sorgulanmaz).
+/// Adres otomatik tamamlama önbelleği (Places API sonuçları + koordinat).
+model AddressGeocodeCache {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  placeId          String?  @unique @map("place_id")
+  formattedAddress String   @map("formatted_address")
+  displayLabel     String   @map("display_label")
+  latitude         Float    @map("latitude")
+  longitude        Float    @map("longitude")
+  searchKey        String   @map("search_key")
+  province         String?  @map("province")
+  district         String?  @map("district")
+  hitCount         Int      @default(0) @map("hit_count")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+
+  @@index([searchKey], map: "idx_address_geocode_search_key")
+  @@map("address_geocode_cache")
+}
+
+/// Nakliye rota mesafesi — Google Routes sonuç önbelleği (koordinat çifti).
 model RouteDistanceCache {
   id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   routeKey             String   @unique @map("route_key")
@@ -349,6 +369,10 @@ model RouteDistanceCache {
   endDistrict          String   @map("end_district")
   originAddress        String   @map("origin_address")
   destinationAddress   String   @map("destination_address")
+  originLat            Float?   @map("origin_lat")
+  originLng            Float?   @map("origin_lng")
+  destinationLat       Float?   @map("destination_lat")
+  destinationLng       Float?   @map("destination_lng")
   distanceMeters       Int      @map("distance_meters")
   durationSeconds      Int      @map("duration_seconds")
   encodedPolyline      String?  @map("encoded_polyline")
