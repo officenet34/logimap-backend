@@ -48,10 +48,4 @@ export class EstimateRouteDto {
   @ValidateNested({ each: true })
   @Type(() => RouteWaypointDto)
   intermediates?: RouteWaypointDto[];
-
-  /** Opsiyonel: Coolify env yoksa manifest/dart-define anahtarı (sunucu Google çağrısı). */
-  @IsOptional()
-  @IsString()
-  @MaxLength(256)
-  routesApiKey?: string;
 }

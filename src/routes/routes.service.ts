@@ -28,58 +28,77 @@ export class RoutesService {
     private readonly config: ConfigService,
   ) {}
 
+  isRoutesConfigured(): boolean {
+    const key = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ?? '';
+    return key.length > 0 && !key.includes('BURAYA_ROUTES');
+  }
+
   async estimate(dto: EstimateRouteDto): Promise<RouteEstimateResponse> {
     const originAddress = this.formatAddress(dto.startDistrict, dto.startProvince);
     const destinationAddress = this.formatAddress(dto.endDistrict, dto.endProvince);
     const routeKey = this.buildRouteKey(dto);
 
-    const cached = await this.prisma.routeDistanceCache.findUnique({
-      where: { routeKey },
-    });
-
-    if (cached) {
-      await this.prisma.routeDistanceCache.update({
+    try {
+      const cached = await this.prisma.routeDistanceCache.findUnique({
         where: { routeKey },
-        data: {
-          lastUsedAt: new Date(),
-          hitCount: { increment: 1 },
-        },
       });
 
-      return this.toResponse(cached, true, dto);
-    }
+      if (cached) {
+        await this.prisma.routeDistanceCache.update({
+          where: { routeKey },
+          data: {
+            lastUsedAt: new Date(),
+            hitCount: { increment: 1 },
+          },
+        });
 
-    const google = await this.fetchFromGoogle(dto, originAddress, destinationAddress);
+        return this.toResponse(cached, true, dto);
+      }
 
-    const again = await this.prisma.routeDistanceCache.findUnique({
-      where: { routeKey },
-    });
+      const google = await this.fetchFromGoogle(
+        originAddress,
+        destinationAddress,
+        dto,
+      );
 
-    if (!again) {
-      await this.prisma.routeDistanceCache.create({
-        data: {
-          routeKey,
-          startProvince: dto.startProvince.trim(),
-          startDistrict: dto.startDistrict.trim(),
-          endProvince: dto.endProvince.trim(),
-          endDistrict: dto.endDistrict.trim(),
-          originAddress,
-          destinationAddress,
-          distanceMeters: google.distanceMeters,
-          durationSeconds: google.durationSeconds,
-          encodedPolyline: google.encodedPolyline,
-        },
+      const again = await this.prisma.routeDistanceCache.findUnique({
+        where: { routeKey },
       });
-    }
 
-    return {
-      cached: false,
-      distanceKm: google.distanceMeters / 1000,
-      durationSeconds: google.durationSeconds,
-      encodedPolyline: google.encodedPolyline,
-      fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
-      toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),
-    };
+      if (!again) {
+        await this.prisma.routeDistanceCache.create({
+          data: {
+            routeKey,
+            startProvince: dto.startProvince.trim(),
+            startDistrict: dto.startDistrict.trim(),
+            endProvince: dto.endProvince.trim(),
+            endDistrict: dto.endDistrict.trim(),
+            originAddress,
+            destinationAddress,
+            distanceMeters: google.distanceMeters,
+            durationSeconds: google.durationSeconds,
+            encodedPolyline: google.encodedPolyline,
+          },
+        });
+      }
+
+      return {
+        cached: false,
+        distanceKm: google.distanceMeters / 1000,
+        durationSeconds: google.durationSeconds,
+        encodedPolyline: google.encodedPolyline,
+        fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
+        toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('route_distance_cache')) {
+        throw new ServiceUnavailableException(
+          'route_distance_cache tablosu yok. database/logimap/010_route_distance_cache.sql çalıştırın.',
+        );
+      }
+      throw err;
+    }
   }
 
   private toResponse(
@@ -135,28 +154,26 @@ export class RoutesService {
     return createHash('sha256').update(segments.join('->')).digest('hex');
   }
 
-  private resolveRoutesApiKey(dto: EstimateRouteDto): string {
-    const fromClient = dto.routesApiKey?.trim();
-    const fromEnv = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim();
-    const key = fromClient || fromEnv || '';
+  private resolveRoutesApiKey(): string {
+    const key = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim() ?? '';
     if (!key || key.includes('BURAYA_ROUTES')) {
       throw new ServiceUnavailableException(
-        'Routes API anahtarı yok. Uygulama manifest anahtarı veya Coolify GOOGLE_ROUTES_API_KEY gerekli.',
+        'GOOGLE_ROUTES_API_KEY sunucuda tanımlı değil. Coolify ortam değişkenine Routes API anahtarını ekleyip API servisini yeniden deploy edin.',
       );
     }
     return key;
   }
 
   private async fetchFromGoogle(
-    dto: EstimateRouteDto,
     originAddress: string,
     destinationAddress: string,
+    dto: EstimateRouteDto,
   ): Promise<{
     distanceMeters: number;
     durationSeconds: number;
     encodedPolyline: string | null;
   }> {
-    const apiKey = this.resolveRoutesApiKey(dto);
+    const apiKey = this.resolveRoutesApiKey();
 
     const body: Record<string, unknown> = {
       origin: { address: originAddress },
