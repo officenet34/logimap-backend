@@ -135,6 +135,18 @@ export class RoutesService {
     return createHash('sha256').update(segments.join('->')).digest('hex');
   }
 
+  private resolveRoutesApiKey(dto: EstimateRouteDto): string {
+    const fromClient = dto.routesApiKey?.trim();
+    const fromEnv = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim();
+    const key = fromClient || fromEnv || '';
+    if (!key || key.includes('BURAYA_ROUTES')) {
+      throw new ServiceUnavailableException(
+        'Routes API anahtarı yok. Uygulama manifest anahtarı veya Coolify GOOGLE_ROUTES_API_KEY gerekli.',
+      );
+    }
+    return key;
+  }
+
   private async fetchFromGoogle(
     dto: EstimateRouteDto,
     originAddress: string,
@@ -144,12 +156,7 @@ export class RoutesService {
     durationSeconds: number;
     encodedPolyline: string | null;
   }> {
-    const apiKey = this.config.get<string>('GOOGLE_ROUTES_API_KEY')?.trim();
-    if (!apiKey) {
-      throw new ServiceUnavailableException(
-        'GOOGLE_ROUTES_API_KEY sunucuda tanımlı değil (Coolify ortam değişkeni).',
-      );
-    }
+    const apiKey = this.resolveRoutesApiKey(dto);
 
     const body: Record<string, unknown> = {
       origin: { address: originAddress },
