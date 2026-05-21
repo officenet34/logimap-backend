@@ -15,10 +15,16 @@ const PROVINCE_ALIAS_GROUPS: readonly string[][] = [
   ['K.MARAŞ', 'K.MARAS', 'KAHRAMANMARAŞ', 'KAHRAMANMARAS'],
 ];
 
+export type RouteLegResponse = {
+  distanceKm: number;
+  durationSeconds: number;
+};
+
 export type RouteEstimateResponse = {
   cached: boolean;
   distanceKm: number;
   durationSeconds: number;
+  legs: RouteLegResponse[];
   encodedPolyline: string | null;
   fromLabel: string;
   toLabel: string;
@@ -37,22 +43,28 @@ export class RoutesService {
 
   async estimate(dto: EstimateRouteDto): Promise<RouteEstimateResponse> {
     const segments = this.buildSegments(dto);
+    const legs: RouteLegResponse[] = [];
     let totalKm = 0;
 
     for (const seg of segments) {
       const km = await this.lookupDistanceKm(seg);
       totalKm += km;
+      legs.push({
+        distanceKm: km,
+        durationSeconds: Math.max(
+          60,
+          Math.round((km / AVG_SPEED_KMH) * 3600),
+        ),
+      });
     }
 
-    const durationSeconds = Math.max(
-      60,
-      Math.round((totalKm / AVG_SPEED_KMH) * 3600),
-    );
+    const durationSeconds = legs.reduce((s, l) => s + l.durationSeconds, 0);
 
     return {
       cached: true,
       distanceKm: totalKm,
       durationSeconds,
+      legs,
       encodedPolyline: null,
       fromLabel: this.placeLabel(dto.startDistrict, dto.startProvince),
       toLabel: this.placeLabel(dto.endDistrict, dto.endProvince),

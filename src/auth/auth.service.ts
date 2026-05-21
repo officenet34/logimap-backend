@@ -294,12 +294,45 @@ export class AuthService {
       throw new UnauthorizedException('Oturum geçersiz');
     }
 
-    await this.prisma.userSession.update({
-      where: { id: session.id },
-      data: { revokedAt: new Date() },
+    // Family247 / kalıcı oturum: aynı session satırında rotate (çoklu revoke döngüsü yok).
+    const payload: JwtPayload = {
+      sub: session.user.id,
+      registrationType: session.user.registrationType,
+      email: session.user.email,
+      phone: session.user.phone,
+    };
+
+    const accessToken = await this.jwt.signAsync(payload, {
+      secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
+      expiresIn: this.config.get('JWT_ACCESS_TTL', '15m'),
     });
 
-    return this.issueTokens(session.user);
+    const newRefreshToken = crypto.randomBytes(48).toString('hex');
+    const refreshDays = Number(this.config.get('JWT_REFRESH_DAYS', '365'));
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + refreshDays);
+
+    await this.prisma.userSession.update({
+      where: { id: session.id },
+      data: {
+        refreshTokenHash: this.hashToken(newRefreshToken),
+        expiresAt,
+      },
+    });
+
+    return {
+      success: true,
+      accessToken,
+      refreshToken: newRefreshToken,
+      tokenType: 'Bearer',
+      expiresIn: this.config.get('JWT_ACCESS_TTL', '15m'),
+      user: {
+        id: session.user.id,
+        registrationType: session.user.registrationType,
+        email: session.user.email,
+        phone: session.user.phone,
+      },
+    };
   }
 
   async forgotPassword(email: string) {
@@ -734,7 +767,7 @@ export class AuthService {
     });
 
     const refreshToken = crypto.randomBytes(48).toString('hex');
-    const refreshDays = Number(this.config.get('JWT_REFRESH_DAYS', '90'));
+    const refreshDays = Number(this.config.get('JWT_REFRESH_DAYS', '365'));
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + refreshDays);
 
