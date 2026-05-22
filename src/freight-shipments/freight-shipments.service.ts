@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   FreightShipmentStatus,
@@ -247,5 +248,128 @@ export class FreightShipmentsService {
     const row = await this.findById(id);
     if (!row || row.userId !== userId) return null;
     return this.mapShipment(row);
+  }
+
+  private buildScalarData(dto: CreateFreightShipmentDto, startAt: Date, vehicleReturnAt: Date) {
+    const routeLegsJson =
+      dto.routeLegs?.map((l) => ({
+        distanceKm: l.distanceKm,
+        durationSeconds: l.durationSeconds,
+      })) ?? [];
+
+    return {
+      startProvince: dto.startProvince.trim(),
+      startDistrict: dto.startDistrict.trim(),
+      startAt,
+      startBreakMinutes: dto.startBreakMinutes ?? 0,
+      endProvince: dto.endProvince.trim(),
+      endDistrict: dto.endDistrict.trim(),
+      vehicleReturnAt,
+      endRestMinutes: dto.endRestMinutes ?? 0,
+      estimatedDistanceKm: dto.estimatedDistanceKm ?? null,
+      estimatedDurationSeconds: dto.estimatedDurationSeconds ?? null,
+      estimatedRouteFromLabel: dto.estimatedRouteFromLabel?.trim() || null,
+      estimatedRouteToLabel: dto.estimatedRouteToLabel?.trim() || null,
+      routeLegsJson,
+      outboundHasLoad: dto.outboundHasLoad?.trim() || null,
+      outboundLoadStatus: dto.outboundLoadStatus?.trim() || null,
+      outboundCanTakeExtraLoad: dto.outboundCanTakeExtraLoad?.trim() || null,
+      outboundLoadDescription: dto.outboundLoadDescription?.trim() || null,
+      outboundFillPercent: dto.outboundFillPercent?.trim() || null,
+      outboundTonnageFullness: dto.outboundTonnageFullness?.trim() || null,
+      outboundCargoSpaceEmpty: dto.outboundCargoSpaceEmpty?.trim() || null,
+      outboundTonnageEmpty: dto.outboundTonnageEmpty?.trim() || null,
+      outboundLoadCriteria: dto.outboundLoadCriteria?.trim() || null,
+      returnHasLoad: dto.returnHasLoad?.trim() || null,
+      returnLoadStatus: dto.returnLoadStatus?.trim() || null,
+      returnLoadDescription: dto.returnLoadDescription?.trim() || null,
+      returnCanTakeExtraLoad: dto.returnCanTakeExtraLoad?.trim() || null,
+      returnFillPercent: dto.returnFillPercent?.trim() || null,
+      returnTonnageFullness: dto.returnTonnageFullness?.trim() || null,
+      returnCargoSpaceEmpty: dto.returnCargoSpaceEmpty?.trim() || null,
+      returnTonnageEmpty: dto.returnTonnageEmpty?.trim() || null,
+      returnOnlySameDirection: dto.returnOnlySameDirection?.trim() || null,
+      returnLoadCriteria: dto.returnLoadCriteria?.trim() || null,
+    };
+  }
+
+  private childCreates(dto: CreateFreightShipmentDto) {
+    return {
+      routeStops: dto.routeStops.map((s, i) => ({
+        sortOrder: i,
+        province: s.province.trim(),
+        district: s.district.trim(),
+        breakMinutes: s.breakMinutes ?? 0,
+      })),
+      loadAtStops: [
+        ...(dto.outboundLoadAtStops ?? []).map((l) => ({
+          direction: 'outbound',
+          routeStopIndex: l.routeStopIndex,
+          fillPercent: l.fillPercent?.trim() || null,
+          tonnageKg: l.tonnageKg?.trim() || null,
+          cargoM3: l.cargoM3?.trim() || null,
+          loadCriteria: l.loadCriteria?.trim() || null,
+        })),
+        ...(dto.returnLoadAtStops ?? []).map((l) => ({
+          direction: 'return',
+          routeStopIndex: l.routeStopIndex,
+          fillPercent: l.fillPercent?.trim() || null,
+          tonnageKg: l.tonnageKg?.trim() || null,
+          cargoM3: l.cargoM3?.trim() || null,
+          loadCriteria: l.loadCriteria?.trim() || null,
+        })),
+      ],
+      surroundingLoads: (dto.returnSurroundingLoads ?? []).map((s, i) => ({
+        sortOrder: i,
+        province: s.province.trim(),
+        district: s.district.trim(),
+      })),
+    };
+  }
+
+  async updateMine(userId: string, id: string, dto: CreateFreightShipmentDto) {
+    if (!dto.acceptedTerms) {
+      throw new BadRequestException('Şartlar ve koşullar kabul edilmelidir');
+    }
+
+    const existing = await this.prisma.freightShipment.findUnique({
+      where: { id },
+      select: { id: true, userId: true },
+    });
+    if (!existing || existing.userId !== userId) {
+      return null;
+    }
+
+    const startAt = new Date(dto.startAt);
+    const vehicleReturnAt = new Date(dto.vehicleReturnAt);
+    if (Number.isNaN(startAt.getTime()) || Number.isNaN(vehicleReturnAt.getTime())) {
+      throw new BadRequestException('Geçersiz tarih veya saat');
+    }
+    if (vehicleReturnAt.getTime() < startAt.getTime()) {
+      throw new BadRequestException('Dönüş zamanı başlangıçtan önce olamaz');
+    }
+
+    const scalar = this.buildScalarData(dto, startAt, vehicleReturnAt);
+    const children = this.childCreates(dto);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.freightShipmentRouteStop.deleteMany({ where: { shipmentId: id } });
+      await tx.freightShipmentLoadAtStop.deleteMany({ where: { shipmentId: id } });
+      await tx.freightShipmentSurroundingLoad.deleteMany({ where: { shipmentId: id } });
+
+      await tx.freightShipment.update({
+        where: { id },
+        data: {
+          ...scalar,
+          acceptedTermsAt: new Date(),
+          routeStops: { create: children.routeStops },
+          loadAtStops: { create: children.loadAtStops },
+          surroundingLoads: { create: children.surroundingLoads },
+        },
+      });
+    });
+
+    const full = await this.findById(id);
+    return this.mapShipment(full);
   }
 }

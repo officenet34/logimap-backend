@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  Put,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -39,6 +40,19 @@ export class FreightShipmentsController {
     @Param('id') id: string,
   ) {
     const shipment = await this.shipments.getMine(user.sub, id);
+    if (!shipment) {
+      throw new NotFoundException('Nakliye kaydı bulunamadı');
+    }
+    return { shipment };
+  }
+
+  @Put('mine/:id')
+  async updateMine(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateFreightShipmentDto,
+  ) {
+    const shipment = await this.shipments.updateMine(user.sub, id, dto);
     if (!shipment) {
       throw new NotFoundException('Nakliye kaydı bulunamadı');
     }
