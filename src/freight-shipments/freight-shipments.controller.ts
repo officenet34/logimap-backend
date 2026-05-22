@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
@@ -57,5 +58,30 @@ export class FreightShipmentsController {
       throw new NotFoundException('Nakliye kaydı bulunamadı');
     }
     return { shipment };
+  }
+
+  @Delete('mine/:id')
+  async deleteMine(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this._deleteMineResponse(user.sub, id);
+  }
+
+  /// DELETE bazı proxy/sunucularda kapalı olabiliyor — mobil istemci yedek.
+  @Post('mine/:id/delete')
+  async deleteMinePost(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+  ) {
+    return this._deleteMineResponse(user.sub, id);
+  }
+
+  private async _deleteMineResponse(userId: string, id: string) {
+    const ok = await this.shipments.deleteMine(userId, id);
+    if (!ok) {
+      throw new NotFoundException('Nakliye kaydı bulunamadı');
+    }
+    return { ok: true };
   }
 }

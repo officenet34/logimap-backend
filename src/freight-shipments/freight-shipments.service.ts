@@ -372,4 +372,49 @@ export class FreightShipmentsService {
     const full = await this.findById(id);
     return this.mapShipment(full);
   }
+
+  private estimatedArrivalAt(
+    row: {
+      startAt: Date;
+      estimatedDurationSeconds: number | null;
+      startBreakMinutes: number;
+      routeLegsJson: unknown;
+      routeStops: { breakMinutes: number }[];
+    },
+  ): Date | null {
+    let routeSec = row.estimatedDurationSeconds ?? 0;
+    if (routeSec <= 0) {
+      const legs = row.routeLegsJson as { durationSeconds?: number }[] | null;
+      if (Array.isArray(legs)) {
+        routeSec = legs.reduce((sum, l) => sum + (l.durationSeconds ?? 0), 0);
+      }
+    }
+    if (routeSec <= 0) return null;
+
+    let breakSec = (row.startBreakMinutes ?? 0) * 60;
+    for (const s of row.routeStops) {
+      breakSec += (s.breakMinutes ?? 0) * 60;
+    }
+    return new Date(row.startAt.getTime() + (routeSec + breakSec) * 1000);
+  }
+
+  async deleteMine(userId: string, id: string): Promise<boolean> {
+    const row = await this.prisma.freightShipment.findUnique({
+      where: { id },
+      include: { routeStops: { orderBy: { sortOrder: 'asc' } } },
+    });
+    if (!row || row.userId !== userId) {
+      return false;
+    }
+    if (row.status === FreightShipmentStatus.completed) {
+      throw new BadRequestException('Tamamlanan nakliye silinemez');
+    }
+    const arrival = this.estimatedArrivalAt(row);
+    if (arrival && arrival.getTime() <= Date.now()) {
+      throw new BadRequestException('Süresi dolmuş nakliye silinemez');
+    }
+
+    await this.prisma.freightShipment.delete({ where: { id } });
+    return true;
+  }
 }
