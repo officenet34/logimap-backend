@@ -57,6 +57,15 @@ enum SectorCode {
   @@map("sector_code")
 }
 
+enum FreightShipmentStatus {
+  draft
+  active
+  completed
+  cancelled
+
+  @@map("freight_shipment_status")
+}
+
 model User {
   id               String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   registrationType RegistrationAccountType @map("registration_type")
@@ -87,6 +96,7 @@ model User {
   activityDocumentsUploaded ActivityDocument[]
   pushTokens               UserPushToken[]
   driverVehicle            DriverVehicle?
+  freightShipments         FreightShipment[]
 
   @@index([registrationType], map: "idx_users_registration_type")
   @@map("users")
@@ -383,5 +393,100 @@ model RouteDistanceCache {
 
   @@index([startProvince, startDistrict, endProvince, endDistrict], map: "idx_route_cache_places")
   @@map("route_distance_cache")
+}
+
+/// Nakliye ekle sihirbazı — tam kayıt (adım 1–3).
+model FreightShipment {
+  id                         String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                     String                @map("user_id") @db.Uuid
+  organizationId             String?               @map("organization_id") @db.Uuid
+  status                     FreightShipmentStatus @default(active)
+  startProvince              String                @map("start_province")
+  startDistrict              String                @map("start_district")
+  startAt                    DateTime              @map("start_at") @db.Timestamptz(6)
+  startBreakMinutes          Int                   @default(0) @map("start_break_minutes")
+  endProvince                String                @map("end_province")
+  endDistrict                String                @map("end_district")
+  vehicleReturnAt            DateTime              @map("vehicle_return_at") @db.Timestamptz(6)
+  endRestMinutes             Int                   @default(0) @map("end_rest_minutes")
+  estimatedDistanceKm        Float?                @map("estimated_distance_km")
+  estimatedDurationSeconds   Int?                  @map("estimated_duration_seconds")
+  estimatedRouteFromLabel    String?               @map("estimated_route_from_label")
+  estimatedRouteToLabel      String?               @map("estimated_route_to_label")
+  routeLegsJson              Json?                 @map("route_legs_json")
+  outboundHasLoad            String?               @map("outbound_has_load")
+  outboundLoadStatus         String?               @map("outbound_load_status")
+  outboundCanTakeExtraLoad   String?               @map("outbound_can_take_extra_load")
+  outboundLoadDescription    String?               @map("outbound_load_description") @db.Text
+  outboundFillPercent        String?               @map("outbound_fill_percent")
+  outboundTonnageFullness    String?               @map("outbound_tonnage_fullness")
+  outboundCargoSpaceEmpty    String?               @map("outbound_cargo_space_empty")
+  outboundTonnageEmpty       String?               @map("outbound_tonnage_empty")
+  outboundLoadCriteria       String?               @map("outbound_load_criteria") @db.Text
+  returnHasLoad              String?               @map("return_has_load")
+  returnLoadStatus           String?               @map("return_load_status")
+  returnLoadDescription      String?               @map("return_load_description") @db.Text
+  returnCanTakeExtraLoad     String?               @map("return_can_take_extra_load")
+  returnFillPercent          String?               @map("return_fill_percent")
+  returnTonnageFullness      String?               @map("return_tonnage_fullness")
+  returnCargoSpaceEmpty      String?               @map("return_cargo_space_empty")
+  returnTonnageEmpty         String?               @map("return_tonnage_empty")
+  returnOnlySameDirection    String?               @map("return_only_same_direction")
+  returnLoadCriteria         String?               @map("return_load_criteria") @db.Text
+  acceptedTermsAt            DateTime              @map("accepted_terms_at") @db.Timestamptz(6)
+  createdAt                  DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user              User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  routeStops       FreightShipmentRouteStop[]
+  loadAtStops      FreightShipmentLoadAtStop[]
+  surroundingLoads FreightShipmentSurroundingLoad[]
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_freight_shipments_user_created")
+  @@index([organizationId, createdAt(sort: Desc)], map: "idx_freight_shipments_org_created")
+  @@map("freight_shipments")
+}
+
+model FreightShipmentRouteStop {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId   String   @map("shipment_id") @db.Uuid
+  sortOrder    Int      @map("sort_order")
+  province     String
+  district     String
+  breakMinutes Int      @default(0) @map("break_minutes")
+
+  shipment FreightShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, sortOrder], map: "idx_freight_route_stops_shipment")
+  @@map("freight_shipment_route_stops")
+}
+
+model FreightShipmentLoadAtStop {
+  id             String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId     String  @map("shipment_id") @db.Uuid
+  direction      String  @map("direction")
+  routeStopIndex Int     @map("route_stop_index")
+  fillPercent    String? @map("fill_percent")
+  tonnageKg      String? @map("tonnage_kg")
+  cargoM3        String? @map("cargo_m3")
+  loadCriteria   String? @map("load_criteria") @db.Text
+
+  shipment FreightShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, direction], map: "idx_freight_load_stops_shipment")
+  @@map("freight_shipment_load_at_stops")
+}
+
+model FreightShipmentSurroundingLoad {
+  id         String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId String @map("shipment_id") @db.Uuid
+  sortOrder  Int    @map("sort_order")
+  province   String
+  district   String
+
+  shipment FreightShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, sortOrder], map: "idx_freight_surrounding_shipment")
+  @@map("freight_shipment_surrounding_loads")
 }
 
