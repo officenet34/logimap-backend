@@ -149,6 +149,64 @@ export class CreateFreightShipmentDto {
   @Type(() => FreightRouteStopDto)
   routeStops!: FreightRouteStopDto[];
 
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  returnStartProvince!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  returnStartDistrict!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  returnEndProvince!: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  returnEndDistrict!: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  returnStartBreakMinutes?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  returnEstimatedDistanceKm?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  returnEstimatedDurationSeconds?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  returnEstimatedRouteFromLabel?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(240)
+  returnEstimatedRouteToLabel?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => FreightRouteLegDto)
+  returnRouteLegs?: FreightRouteLegDto[];
+
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ValidateNested({ each: true })
+  @Type(() => FreightRouteStopDto)
+  returnRouteStops!: FreightRouteStopDto[];
+
   @IsOptional()
   @IsString()
   @MaxLength(16)

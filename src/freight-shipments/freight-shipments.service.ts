@@ -37,6 +37,7 @@ export class FreightShipmentsService {
   private mapShipment(row: Awaited<ReturnType<FreightShipmentsService['findById']>>) {
     if (!row) return null;
     const legs = row.routeLegsJson;
+    const returnLegs = row.returnRouteLegsJson;
     return {
       id: row.id,
       userId: row.userId,
@@ -56,6 +57,22 @@ export class FreightShipmentsService {
       estimatedRouteToLabel: row.estimatedRouteToLabel,
       routeLegs: Array.isArray(legs) ? legs : [],
       routeStops: row.routeStops.map((s) => ({
+        province: s.province,
+        district: s.district,
+        breakMinutes: s.breakMinutes,
+        sortOrder: s.sortOrder,
+      })),
+      returnStartProvince: row.returnStartProvince,
+      returnStartDistrict: row.returnStartDistrict,
+      returnEndProvince: row.returnEndProvince,
+      returnEndDistrict: row.returnEndDistrict,
+      returnStartBreakMinutes: row.returnStartBreakMinutes,
+      returnEstimatedDistanceKm: row.returnEstimatedDistanceKm,
+      returnEstimatedDurationSeconds: row.returnEstimatedDurationSeconds,
+      returnEstimatedRouteFromLabel: row.returnEstimatedRouteFromLabel,
+      returnEstimatedRouteToLabel: row.returnEstimatedRouteToLabel,
+      returnRouteLegs: Array.isArray(returnLegs) ? returnLegs : [],
+      returnRouteStops: row.returnRouteStops.map((s) => ({
         province: s.province,
         district: s.district,
         breakMinutes: s.breakMinutes,
@@ -118,6 +135,7 @@ export class FreightShipmentsService {
       where: { id },
       include: {
         routeStops: { orderBy: { sortOrder: 'asc' } },
+        returnRouteStops: { orderBy: { sortOrder: 'asc' } },
         loadAtStops: { orderBy: [{ direction: 'asc' }, { routeStopIndex: 'asc' }] },
         surroundingLoads: { orderBy: { sortOrder: 'asc' } },
       },
@@ -144,6 +162,11 @@ export class FreightShipmentsService {
         distanceKm: l.distanceKm,
         durationSeconds: l.durationSeconds,
       })) ?? [];
+    const returnRouteLegsJson =
+      dto.returnRouteLegs?.map((l) => ({
+        distanceKm: l.distanceKm,
+        durationSeconds: l.durationSeconds,
+      })) ?? [];
 
     const shipment = await this.prisma.freightShipment.create({
       data: {
@@ -163,6 +186,18 @@ export class FreightShipmentsService {
         estimatedRouteFromLabel: dto.estimatedRouteFromLabel?.trim() || null,
         estimatedRouteToLabel: dto.estimatedRouteToLabel?.trim() || null,
         routeLegsJson,
+        returnStartProvince: dto.returnStartProvince.trim(),
+        returnStartDistrict: dto.returnStartDistrict.trim(),
+        returnEndProvince: dto.returnEndProvince.trim(),
+        returnEndDistrict: dto.returnEndDistrict.trim(),
+        returnStartBreakMinutes: dto.returnStartBreakMinutes ?? 0,
+        returnEstimatedDistanceKm: dto.returnEstimatedDistanceKm ?? null,
+        returnEstimatedDurationSeconds: dto.returnEstimatedDurationSeconds ?? null,
+        returnEstimatedRouteFromLabel:
+          dto.returnEstimatedRouteFromLabel?.trim() || null,
+        returnEstimatedRouteToLabel:
+          dto.returnEstimatedRouteToLabel?.trim() || null,
+        returnRouteLegsJson,
         outboundHasLoad: dto.outboundHasLoad?.trim() || null,
         outboundLoadStatus: dto.outboundLoadStatus?.trim() || null,
         outboundCanTakeExtraLoad: dto.outboundCanTakeExtraLoad?.trim() || null,
@@ -185,6 +220,14 @@ export class FreightShipmentsService {
         acceptedTermsAt: new Date(),
         routeStops: {
           create: dto.routeStops.map((s, i) => ({
+            sortOrder: i,
+            province: s.province.trim(),
+            district: s.district.trim(),
+            breakMinutes: s.breakMinutes ?? 0,
+          })),
+        },
+        returnRouteStops: {
+          create: dto.returnRouteStops.map((s, i) => ({
             sortOrder: i,
             province: s.province.trim(),
             district: s.district.trim(),
@@ -237,6 +280,7 @@ export class FreightShipmentsService {
       take: 100,
       include: {
         routeStops: { orderBy: { sortOrder: 'asc' } },
+        returnRouteStops: { orderBy: { sortOrder: 'asc' } },
         loadAtStops: true,
         surroundingLoads: { orderBy: { sortOrder: 'asc' } },
       },
@@ -256,6 +300,11 @@ export class FreightShipmentsService {
         distanceKm: l.distanceKm,
         durationSeconds: l.durationSeconds,
       })) ?? [];
+    const returnRouteLegsJson =
+      dto.returnRouteLegs?.map((l) => ({
+        distanceKm: l.distanceKm,
+        durationSeconds: l.durationSeconds,
+      })) ?? [];
 
     return {
       startProvince: dto.startProvince.trim(),
@@ -271,6 +320,18 @@ export class FreightShipmentsService {
       estimatedRouteFromLabel: dto.estimatedRouteFromLabel?.trim() || null,
       estimatedRouteToLabel: dto.estimatedRouteToLabel?.trim() || null,
       routeLegsJson,
+      returnStartProvince: dto.returnStartProvince.trim(),
+      returnStartDistrict: dto.returnStartDistrict.trim(),
+      returnEndProvince: dto.returnEndProvince.trim(),
+      returnEndDistrict: dto.returnEndDistrict.trim(),
+      returnStartBreakMinutes: dto.returnStartBreakMinutes ?? 0,
+      returnEstimatedDistanceKm: dto.returnEstimatedDistanceKm ?? null,
+      returnEstimatedDurationSeconds: dto.returnEstimatedDurationSeconds ?? null,
+      returnEstimatedRouteFromLabel:
+        dto.returnEstimatedRouteFromLabel?.trim() || null,
+      returnEstimatedRouteToLabel:
+        dto.returnEstimatedRouteToLabel?.trim() || null,
+      returnRouteLegsJson,
       outboundHasLoad: dto.outboundHasLoad?.trim() || null,
       outboundLoadStatus: dto.outboundLoadStatus?.trim() || null,
       outboundCanTakeExtraLoad: dto.outboundCanTakeExtraLoad?.trim() || null,
@@ -296,6 +357,12 @@ export class FreightShipmentsService {
   private childCreates(dto: CreateFreightShipmentDto) {
     return {
       routeStops: dto.routeStops.map((s, i) => ({
+        sortOrder: i,
+        province: s.province.trim(),
+        district: s.district.trim(),
+        breakMinutes: s.breakMinutes ?? 0,
+      })),
+      returnRouteStops: dto.returnRouteStops.map((s, i) => ({
         sortOrder: i,
         province: s.province.trim(),
         district: s.district.trim(),
@@ -354,6 +421,7 @@ export class FreightShipmentsService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.freightShipmentRouteStop.deleteMany({ where: { shipmentId: id } });
+      await tx.freightShipmentReturnRouteStop.deleteMany({ where: { shipmentId: id } });
       await tx.freightShipmentLoadAtStop.deleteMany({ where: { shipmentId: id } });
       await tx.freightShipmentSurroundingLoad.deleteMany({ where: { shipmentId: id } });
 
@@ -363,6 +431,7 @@ export class FreightShipmentsService {
           ...scalar,
           acceptedTermsAt: new Date(),
           routeStops: { create: children.routeStops },
+          returnRouteStops: { create: children.returnRouteStops },
           loadAtStops: { create: children.loadAtStops },
           surroundingLoads: { create: children.surroundingLoads },
         },

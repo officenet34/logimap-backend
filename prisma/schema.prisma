@@ -414,6 +414,16 @@ model FreightShipment {
   estimatedRouteFromLabel    String?               @map("estimated_route_from_label")
   estimatedRouteToLabel      String?               @map("estimated_route_to_label")
   routeLegsJson              Json?                 @map("route_legs_json")
+  returnStartProvince        String?               @map("return_start_province")
+  returnStartDistrict        String?               @map("return_start_district")
+  returnEndProvince          String?               @map("return_end_province")
+  returnEndDistrict          String?               @map("return_end_district")
+  returnStartBreakMinutes    Int                   @default(0) @map("return_start_break_minutes")
+  returnEstimatedDistanceKm  Float?                @map("return_estimated_distance_km")
+  returnEstimatedDurationSeconds Int?              @map("return_estimated_duration_seconds")
+  returnEstimatedRouteFromLabel String?            @map("return_estimated_route_from_label")
+  returnEstimatedRouteToLabel   String?            @map("return_estimated_route_to_label")
+  returnRouteLegsJson        Json?                 @map("return_route_legs_json")
   outboundHasLoad            String?               @map("outbound_has_load")
   outboundLoadStatus         String?               @map("outbound_load_status")
   outboundCanTakeExtraLoad   String?               @map("outbound_can_take_extra_load")
@@ -438,9 +448,10 @@ model FreightShipment {
   updatedAt                  DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user              User                            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  routeStops       FreightShipmentRouteStop[]
-  loadAtStops      FreightShipmentLoadAtStop[]
-  surroundingLoads FreightShipmentSurroundingLoad[]
+  routeStops         FreightShipmentRouteStop[]
+  returnRouteStops   FreightShipmentReturnRouteStop[]
+  loadAtStops        FreightShipmentLoadAtStop[]
+  surroundingLoads   FreightShipmentSurroundingLoad[]
 
   @@index([userId, createdAt(sort: Desc)], map: "idx_freight_shipments_user_created")
   @@index([organizationId, createdAt(sort: Desc)], map: "idx_freight_shipments_org_created")
@@ -459,6 +470,20 @@ model FreightShipmentRouteStop {
 
   @@index([shipmentId, sortOrder], map: "idx_freight_route_stops_shipment")
   @@map("freight_shipment_route_stops")
+}
+
+model FreightShipmentReturnRouteStop {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  shipmentId   String   @map("shipment_id") @db.Uuid
+  sortOrder    Int      @map("sort_order")
+  province     String
+  district     String
+  breakMinutes Int      @default(0) @map("break_minutes")
+
+  shipment FreightShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, sortOrder], map: "idx_freight_return_route_stops_shipment")
+  @@map("freight_shipment_return_route_stops")
 }
 
 model FreightShipmentLoadAtStop {
