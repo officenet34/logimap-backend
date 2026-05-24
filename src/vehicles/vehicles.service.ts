@@ -182,16 +182,48 @@ export class VehiclesService {
 
   /** İşletmedeki kayıtlı araçlar (üye başına en güncel araç). */
   async listFleet(userId: string) {
-    type FleetUser = Parameters<VehiclesService['mapFleetRow']>[0];
+    type FleetVehicle = {
+      vehicleBrand: string;
+      vehicleModel: string;
+      plateVehicle: string;
+      plateTrailer: string | null;
+      vehicleType: string;
+      bodyType: string;
+      images: { imageUrl: string; thumbnailUrl: string; sortOrder: number }[];
+    };
+
+    type FleetUserRow = {
+      id: string;
+      firstName: string;
+      lastName: string;
+      profileImageUrl: string | null;
+      profileImageThumbnailUrl: string | null;
+      driverVehicles: FleetVehicle[];
+      driverLocationLatest: {
+        latitude: number;
+        longitude: number;
+        recordedAt: Date;
+      } | null;
+    };
 
     const seen = new Set<string>();
     const rows: ReturnType<VehiclesService['mapFleetRow']>[] = [];
 
-    const pushUser = (u: FleetUser | null | undefined) => {
-      const v = u?.driverVehicles?.[0];
+    const pushUser = (u: FleetUserRow | null | undefined) => {
+      const v = u?.driverVehicles[0];
       if (!v || !u || seen.has(u.id)) return;
       seen.add(u.id);
-      rows.push(this.mapFleetRow({ ...u, driverVehicle: v }));
+      rows.push(
+        this.mapFleetRow({
+          id: u.id,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          profileImageUrl: u.profileImageUrl,
+          profileImageThumbnailUrl: u.profileImageThumbnailUrl,
+          driverVehicle: v,
+          driverLocationLatest: u.driverLocationLatest,
+        }),
+      );
     };
 
     const userSelect = {
@@ -212,7 +244,7 @@ export class VehiclesService {
       where: { id: userId },
       select: userSelect,
     });
-    pushUser(self as FleetUser | null);
+    pushUser(self);
 
     const ctx = await this.prisma.user.findUnique({
       where: { id: userId },
@@ -243,7 +275,7 @@ export class VehiclesService {
         orderBy: { joinedAt: 'asc' },
       });
       for (const m of members) {
-        pushUser(m.user as FleetUser);
+        pushUser(m.user);
       }
 
       const org = await this.prisma.organization.findUnique({
@@ -255,7 +287,7 @@ export class VehiclesService {
           where: { id: org.createdByUserId },
           select: userSelect,
         });
-        pushUser(creator as FleetUser | null);
+        pushUser(creator);
       }
     }
 
