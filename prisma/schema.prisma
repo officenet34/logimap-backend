@@ -97,9 +97,27 @@ model User {
   pushTokens               UserPushToken[]
   driverVehicle            DriverVehicle?
   freightShipments         FreightShipment[]
+  savedLocations           SavedLocation[]
 
   @@index([registrationType], map: "idx_users_registration_type")
   @@map("users")
+}
+
+model SavedLocation {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  latitude  Float
+  longitude Float
+  address   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_saved_locations_user_id")
+  @@index([createdAt(sort: Desc)], map: "idx_saved_locations_created_at")
+  @@map("saved_locations")
 }
 
 model DriverVehicle {
