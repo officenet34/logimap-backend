@@ -1,70 +1,186 @@
-import { Injectable } from '@nestjs/common';
 import {
-  InvitationStatus,
-  OrganizationMemberRole,
-  RegistrationAccountType,
-} from '@prisma/client';
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { InvitationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertVehicleDto } from './dto/upsert-vehicle.dto';
+
+const vehicleInclude = {
+  images: { orderBy: { sortOrder: 'asc' as const } },
+} as const;
 
 @Injectable()
 export class VehiclesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getMine(userId: string) {
-    return this.prisma.driverVehicle.findUnique({
-      where: { userId },
-      include: {
-        images: { orderBy: { sortOrder: 'asc' } },
-      },
-    });
+  private mapVehicle(row: {
+    id: string;
+    userId: string;
+    vehicleBrand: string;
+    vehicleModel: string;
+    makeModel: string | null;
+    plateVehicle: string;
+    plateTrailer: string | null;
+    vehicleType: string;
+    modelYear: string;
+    color: string;
+    bodyType: string;
+    widthCm: string;
+    lengthCm: string;
+    heightCm: string;
+    bodyVolumeM3: string;
+    tonnageKg: string;
+    extraInfo: string;
+    createdAt: Date;
+    updatedAt: Date;
+    images: {
+      id: string;
+      imageUrl: string;
+      thumbnailUrl: string;
+      sortOrder: number;
+    }[];
+  }) {
+    return {
+      id: row.id,
+      userId: row.userId,
+      vehicleBrand: row.vehicleBrand,
+      vehicleModel: row.vehicleModel,
+      makeModel: row.makeModel,
+      plateVehicle: row.plateVehicle,
+      plateTrailer: row.plateTrailer,
+      vehicleType: row.vehicleType,
+      modelYear: row.modelYear,
+      color: row.color,
+      bodyType: row.bodyType,
+      widthCm: row.widthCm,
+      lengthCm: row.lengthCm,
+      heightCm: row.heightCm,
+      bodyVolumeM3: row.bodyVolumeM3,
+      tonnageKg: row.tonnageKg,
+      extraInfo: row.extraInfo,
+      createdAt: row.createdAt.toISOString(),
+      updatedAt: row.updatedAt.toISOString(),
+      images: row.images.map((img) => ({
+        id: img.id,
+        imageUrl: img.imageUrl,
+        thumbnailUrl: img.thumbnailUrl,
+        sortOrder: img.sortOrder,
+      })),
+    };
   }
 
-  async upsertMine(userId: string, dto: UpsertVehicleDto) {
-    const images = dto.images ?? [];
-    const {
-      images: _omit,
-      plateTrailer,
-      makeModel: _legacyMakeModel,
-      ...scalar
-    } = dto;
-
-    const makeModel = `${dto.vehicleBrand} ${dto.vehicleModel}`.trim();
-
-    const vehicle = await this.prisma.driverVehicle.upsert({
-      where: { userId },
-      create: {
-        userId,
-        ...scalar,
-        makeModel,
-        plateTrailer: plateTrailer ?? null,
-      },
-      update: {
-        ...scalar,
-        makeModel,
-        plateTrailer: plateTrailer ?? null,
-      },
-    });
-
-    await this.prisma.driverVehicleImage.deleteMany({
-      where: { vehicleId: vehicle.id },
-    });
-
-    if (images.length > 0) {
+  private async persistImages(
+    vehicleId: string,
+    images: UpsertVehicleDto['images'],
+  ) {
+    await this.prisma.driverVehicleImage.deleteMany({ where: { vehicleId } });
+    if (images && images.length > 0) {
       await this.prisma.driverVehicleImage.createMany({
         data: images.map((img, i) => ({
-          vehicleId: vehicle.id,
+          vehicleId,
           imageUrl: img.imageUrl,
           thumbnailUrl: img.thumbnailUrl,
           sortOrder: img.sortOrder ?? i,
         })),
       });
     }
-
-    return this.getMine(userId);
   }
 
-  /** İşletmedeki kayıtlı araçlar (tüm üyeler + kendi aracınız). */
+  private scalarFromDto(dto: UpsertVehicleDto) {
+    const {
+      images: _omit,
+      plateTrailer,
+      makeModel: _legacyMakeModel,
+      ...scalar
+    } = dto;
+    const makeModel = `${dto.vehicleBrand} ${dto.vehicleModel}`.trim();
+    return {
+      ...scalar,
+      makeModel,
+      plateTrailer: plateTrailer ?? null,
+    };
+  }
+
+  async listMine(userId: string) {
+    const rows = await this.prisma.driverVehicle.findMany({
+      where: { userId },
+      include: vehicleInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((r) => this.mapVehicle(r));
+  }
+
+  async getMine(userId: string) {
+    const row = await this.prisma.driverVehicle.findFirst({
+      where: { userId },
+      include: vehicleInclude,
+      orderBy: { createdAt: 'desc' },
+    });
+    return row ? this.mapVehicle(row) : null;
+  }
+
+  async getMineById(userId: string, id: string) {
+    const row = await this.prisma.driverVehicle.findUnique({
+      where: { id },
+      include: vehicleInclude,
+    });
+    if (!row) throw new NotFoundException('Araç bulunamadı');
+    if (row.userId !== userId) throw new ForbiddenException();
+    return this.mapVehicle(row);
+  }
+
+  async createMine(userId: string, dto: UpsertVehicleDto) {
+    const images = dto.images ?? [];
+    const vehicle = await this.prisma.driverVehicle.create({
+      data: {
+        userId,
+        ...this.scalarFromDto(dto),
+      },
+    });
+    await this.persistImages(vehicle.id, images);
+    return this.getMineById(userId, vehicle.id);
+  }
+
+  async updateMine(userId: string, id: string, dto: UpsertVehicleDto) {
+    const existing = await this.prisma.driverVehicle.findUnique({
+      where: { id },
+    });
+    if (!existing) throw new NotFoundException('Araç bulunamadı');
+    if (existing.userId !== userId) throw new ForbiddenException();
+
+    await this.prisma.driverVehicle.update({
+      where: { id },
+      data: this.scalarFromDto(dto),
+    });
+    await this.persistImages(id, dto.images ?? []);
+    return this.getMineById(userId, id);
+  }
+
+  async deleteMine(userId: string, id: string) {
+    const existing = await this.prisma.driverVehicle.findUnique({
+      where: { id },
+    });
+    if (!existing) throw new NotFoundException('Araç bulunamadı');
+    if (existing.userId !== userId) throw new ForbiddenException();
+    await this.prisma.driverVehicle.delete({ where: { id } });
+    return { success: true };
+  }
+
+  /** Geriye dönük: ilk aracı günceller veya yeni oluşturur. */
+  async upsertMine(userId: string, dto: UpsertVehicleDto) {
+    const existing = await this.prisma.driverVehicle.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (existing) {
+      return this.updateMine(userId, existing.id, dto);
+    }
+    return this.createMine(userId, dto);
+  }
+
+  /** İşletmedeki kayıtlı araçlar (üye başına en güncel araç). */
   async listFleet(userId: string) {
     type FleetUser = Parameters<VehiclesService['mapFleetRow']>[0];
 
@@ -72,9 +188,10 @@ export class VehiclesService {
     const rows: ReturnType<VehiclesService['mapFleetRow']>[] = [];
 
     const pushUser = (u: FleetUser | null | undefined) => {
-      if (!u?.driverVehicle || seen.has(u.id)) return;
+      const v = u?.driverVehicles?.[0];
+      if (!v || !u || seen.has(u.id)) return;
       seen.add(u.id);
-      rows.push(this.mapFleetRow(u));
+      rows.push(this.mapFleetRow({ ...u, driverVehicle: v }));
     };
 
     const userSelect = {
@@ -83,10 +200,10 @@ export class VehiclesService {
       lastName: true,
       profileImageUrl: true,
       profileImageThumbnailUrl: true,
-      driverVehicle: {
-        include: {
-          images: { orderBy: { sortOrder: 'asc' as const } },
-        },
+      driverVehicles: {
+        include: vehicleInclude,
+        orderBy: { createdAt: 'desc' as const },
+        take: 1,
       },
       driverLocationLatest: true,
     } as const;
@@ -159,14 +276,14 @@ export class VehiclesService {
       vehicleType: string;
       bodyType: string;
       images: { imageUrl: string; thumbnailUrl: string; sortOrder: number }[];
-    } | null;
+    };
     driverLocationLatest: {
       latitude: number;
       longitude: number;
       recordedAt: Date;
     } | null;
   }) {
-    const v = user.driverVehicle!;
+    const v = user.driverVehicle;
     const thumb = user.profileImageThumbnailUrl ?? user.profileImageUrl;
     const firstImg = v.images[0];
     const loc = user.driverLocationLatest;

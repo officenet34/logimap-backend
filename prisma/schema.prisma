@@ -95,7 +95,7 @@ model User {
   driverLocationLatest     DriverLocationLatest?
   activityDocumentsUploaded ActivityDocument[]
   pushTokens               UserPushToken[]
-  driverVehicle            DriverVehicle?
+  driverVehicles           DriverVehicle[]
   freightShipments         FreightShipment[]
   savedLocations           SavedLocation[]
 
@@ -122,7 +122,7 @@ model SavedLocation {
 
 model DriverVehicle {
   id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId         String   @unique @map("user_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
   vehicleBrand   String   @map("vehicle_brand")
   vehicleModel   String   @map("vehicle_model")
   makeModel      String?  @map("make_model")
@@ -144,6 +144,7 @@ model DriverVehicle {
   user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   images DriverVehicleImage[]
 
+  @@index([userId], map: "idx_driver_vehicles_user_id_multi")
   @@map("driver_vehicles")
 }
 
