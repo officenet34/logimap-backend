@@ -102,7 +102,7 @@ export class OrganizationsService {
       dto.inviteRole !== OrganizationMemberRole.driver &&
       dto.inviteRole !== OrganizationMemberRole.manager
     ) {
-      throw new BadRequestException('Yalnızca şoför veya yetkili rolü seçilebilir');
+      throw new BadRequestException('Yalnızca şoför veya personel rolü seçilebilir');
     }
 
     const target = await this.prisma.user.findUnique({
@@ -205,7 +205,7 @@ export class OrganizationsService {
   }
 
   async listDrivers(userId: string, organizationId: string) {
-    await this.assertOrgManager(userId, organizationId);
+    await this.assertCanInviteMembers(userId, organizationId);
 
     const members = await this.prisma.organizationMember.findMany({
       where: {
@@ -232,7 +232,7 @@ export class OrganizationsService {
   }
 
   async getDriver(userId: string, organizationId: string, driverUserId: string) {
-    await this.assertOrgManager(userId, organizationId);
+    await this.assertCanInviteMembers(userId, organizationId);
     const member = await this.findOrgDriverMember(organizationId, driverUserId);
     return {
       driver: {
@@ -460,8 +460,32 @@ export class OrganizationsService {
     }
   }
 
+  /** Yalnızca işletmeyi kuran yönetici (owner) personel davet edebilir. */
   private async assertCanInviteMembers(userId: string, organizationId: string) {
-    await this.assertOrgManager(userId, organizationId);
+    const ownerMember = await this.prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId,
+        memberRole: OrganizationMemberRole.owner,
+        status: InvitationStatus.accepted,
+      },
+    });
+    if (!ownerMember) {
+      throw new ForbiddenException(
+        'Personel daveti yalnızca işletme yöneticisi tarafından gönderilebilir',
+      );
+    }
+
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { createdByUserId: true },
+    });
+    if (!org || org.createdByUserId !== userId) {
+      throw new ForbiddenException(
+        'Personel daveti yalnızca işletme hesabını oluşturan yönetici tarafından gönderilebilir',
+      );
+    }
+
     const inviter = await this.prisma.user.findUnique({ where: { id: userId } });
     if (
       !inviter ||
@@ -469,7 +493,7 @@ export class OrganizationsService {
         inviter.registrationType !== RegistrationAccountType.company)
     ) {
       throw new ForbiddenException(
-        'Üye daveti yalnızca şahıs firması veya şirket hesabından gönderilebilir',
+        'Personel daveti yalnızca şahıs firması veya şirket hesabından gönderilebilir',
       );
     }
   }

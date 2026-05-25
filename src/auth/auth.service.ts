@@ -26,6 +26,7 @@ import {
   formatSectorLines,
   resolveSectors,
 } from '../common/utils/sectors.util';
+import { profileRoleLabel } from '../common/utils/org-role-label.util';
 import { JwtPayload } from './interfaces/jwt-payload.interface';
 import { LoginDto } from './dto/login.dto';
 import { RegisterSoleProprietorDto } from './dto/register-sole-proprietor.dto';
@@ -136,11 +137,7 @@ export class AuthService {
 
     const passwordHash = await hashPin(dto.password);
     const sectors = resolveSectors(dto.sectors);
-    const memberRole =
-      dto.companyPosition === 'company_owner'
-        ? OrganizationMemberRole.owner
-        : OrganizationMemberRole.manager;
-
+    // Şirket hesabını oluşturan kullanıcı her zaman işletme sahibi (owner / yönetici).
     const result = await this.prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
@@ -199,7 +196,7 @@ export class AuthService {
         data: {
           organizationId: org.id,
           userId: user.id,
-          memberRole,
+          memberRole: OrganizationMemberRole.owner,
           companyPosition: dto.companyPosition,
           status: InvitationStatus.accepted,
           joinedAt: new Date(),
@@ -750,6 +747,8 @@ export class AuthService {
       profileOrganizationId: org?.id ?? null,
       profileOrgCode: org?.orgCode ?? null,
       memberCode: user.memberCode,
+      profileOrgMemberRole: orgMemberRole,
+      profileRoleLabel: profileRoleLabel(user.registrationType, orgMemberRole),
       profileTaxOffice: org?.taxOffice ?? null,
       profileSectorCodes: sectorCodes,
       profileSectorLabel: formatSectorLabels(sectorCodes),
