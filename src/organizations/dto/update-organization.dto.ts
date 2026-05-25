@@ -19,6 +19,27 @@ export class UpdateOrganizationDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
+  taxNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  landlinePhone?: string;
+
+  @IsOptional()
+  @IsString()
+  mobilePhone?: string;
+
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  websiteUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
   city?: string;
 
   @IsOptional()

@@ -57,7 +57,7 @@ export class AuthService {
           firstName: dto.firstName,
           lastName: dto.lastName,
           gender: dto.gender,
-          nationalId: dto.taxNumber,
+          nationalId: dto.nationalId,
           profileImageUrl: dto.profileImageUrl,
         },
       });

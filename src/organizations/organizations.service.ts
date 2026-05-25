@@ -62,6 +62,11 @@ export class OrganizationsService {
         orgCode: org.orgCode,
         logoUrl: org.logoUrl,
         taxOffice: org.taxOffice,
+        taxNumber: org.taxNumber,
+        landlinePhone: org.landlinePhone,
+        mobilePhone: org.mobilePhone,
+        email: org.email,
+        websiteUrl: org.websiteUrl,
         city: org.city,
         district: org.district,
         country: org.country,
@@ -91,6 +96,15 @@ export class OrganizationsService {
     if (dto.displayName != null) orgData.displayName = dto.displayName.trim();
     if (dto.logoUrl != null) orgData.logoUrl = dto.logoUrl.trim() || null;
     if (dto.taxOffice != null) orgData.taxOffice = dto.taxOffice.trim();
+    if (dto.taxNumber != null) orgData.taxNumber = dto.taxNumber.trim();
+    if (dto.landlinePhone != null) {
+      orgData.landlinePhone = dto.landlinePhone.trim() || null;
+    }
+    if (dto.mobilePhone != null) orgData.mobilePhone = dto.mobilePhone.trim();
+    if (dto.email != null) orgData.email = dto.email.trim().toLowerCase();
+    if (dto.websiteUrl != null) {
+      orgData.websiteUrl = dto.websiteUrl.trim() || null;
+    }
     if (dto.city != null) orgData.city = dto.city.trim();
     if (dto.district != null) orgData.district = dto.district.trim();
     if (dto.country != null) orgData.country = dto.country.trim();

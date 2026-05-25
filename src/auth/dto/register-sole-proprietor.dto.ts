@@ -44,6 +44,12 @@ export class RegisterSoleProprietorDto {
 
   @IsString()
   @IsNotEmpty()
+  @Length(11, 11)
+  @Matches(/^\d{11}$/)
+  nationalId!: string;
+
+  @IsString()
+  @IsNotEmpty()
   phone!: string;
 
   @IsEmail()
