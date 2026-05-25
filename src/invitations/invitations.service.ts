@@ -20,7 +20,7 @@ export class InvitationsService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException();
 
-    return this.prisma.organizationInvitation.findMany({
+    const rows = await this.prisma.organizationInvitation.findMany({
       where: {
         status: InvitationStatus.pending,
         expiresAt: { gt: new Date() },
@@ -40,6 +40,18 @@ export class InvitationsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    return {
+      invitations: rows.map((inv) => ({
+        id: inv.id,
+        inviteCode: inv.inviteCode,
+        inviteRole: inv.inviteRole,
+        message: inv.message,
+        expiresAt: inv.expiresAt,
+        organization: inv.organization,
+        invitedBy: inv.invitedBy,
+      })),
+    };
   }
 
   async accept(userId: string, inviteCode: string) {
@@ -61,12 +73,14 @@ export class InvitationsService {
       throw new BadRequestException('Yalnızca şoför hesabı daveti kabul edebilir');
     }
 
+    const memberRole = invitation.inviteRole;
+
     await this.prisma.$transaction(async (tx) => {
       const existing = await tx.organizationMember.findFirst({
         where: {
           organizationId: invitation.organizationId,
           userId,
-          memberRole: OrganizationMemberRole.driver,
+          memberRole,
         },
       });
 
@@ -75,9 +89,17 @@ export class InvitationsService {
           data: {
             organizationId: invitation.organizationId,
             userId,
-            memberRole: OrganizationMemberRole.driver,
+            memberRole,
             status: InvitationStatus.accepted,
             invitedByUserId: invitation.invitedByUserId,
+            joinedAt: new Date(),
+          },
+        });
+      } else if (existing.status !== InvitationStatus.accepted) {
+        await tx.organizationMember.update({
+          where: { id: existing.id },
+          data: {
+            status: InvitationStatus.accepted,
             joinedAt: new Date(),
           },
         });

@@ -81,6 +81,7 @@ model User {
   emailVerifiedAt  DateTime?               @map("email_verified_at") @db.Timestamptz(6)
   phoneVerifiedAt  DateTime?               @map("phone_verified_at") @db.Timestamptz(6)
   isActive         Boolean                 @default(true) @map("is_active")
+  memberCode       String?                 @unique @map("member_code") @db.Char(7)
   createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime                @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -209,6 +210,7 @@ model Organization {
   country         String           @default("Türkiye")
   addressLine     String           @map("address_line")
   createdByUserId String           @map("created_by_user_id") @db.Uuid
+  orgCode         String?          @unique @map("org_code") @db.Char(8)
   isActive        Boolean          @default(true) @map("is_active")
   createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)

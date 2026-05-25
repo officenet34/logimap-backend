@@ -11,14 +11,15 @@ import {
   Prisma,
   RegistrationAccountType,
 } from '@prisma/client';
-
 type DriverUserWithProfile = Prisma.UserGetPayload<{
   include: { driverProfile: true };
 }>;
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../common/utils/password.util';
+import { generateUserMemberCode } from '../common/utils/member-code.util';
 import { normalizePhone, isValidE164 } from '../common/utils/phone.util';
 import { InviteDriverDto } from './dto/invite-driver.dto';
+import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
 
@@ -61,8 +62,6 @@ export class OrganizationsService {
   }
 
   async inviteDriver(userId: string, organizationId: string, dto: InviteDriverDto) {
-    await this.assertOrgManager(userId, organizationId);
-
     if (!dto.targetPhone && !dto.targetEmail) {
       throw new BadRequestException('Telefon veya e-posta gerekli');
     }
@@ -82,22 +81,80 @@ export class OrganizationsService {
           ].filter(Boolean) as object[],
         },
       });
-      if (target && target.registrationType !== RegistrationAccountType.driver) {
-        throw new BadRequestException('Davet yalnızca şoför hesabına gönderilebilir');
-      }
       targetUserId = target?.id;
+    }
+
+    if (!targetUserId) {
+      throw new BadRequestException('Kullanıcı bulunamadı');
+    }
+
+    return this.inviteMember(userId, organizationId, {
+      targetUserId,
+      inviteRole: OrganizationMemberRole.driver,
+      message: dto.message,
+    });
+  }
+
+  async inviteMember(userId: string, organizationId: string, dto: InviteMemberDto) {
+    await this.assertCanInviteMembers(userId, organizationId);
+
+    if (
+      dto.inviteRole !== OrganizationMemberRole.driver &&
+      dto.inviteRole !== OrganizationMemberRole.manager
+    ) {
+      throw new BadRequestException('Yalnızca şoför veya yetkili rolü seçilebilir');
+    }
+
+    const target = await this.prisma.user.findUnique({
+      where: { id: dto.targetUserId },
+    });
+    if (!target || !target.isActive) {
+      throw new NotFoundException('Kullanıcı bulunamadı');
+    }
+    if (target.registrationType !== RegistrationAccountType.driver) {
+      throw new BadRequestException(
+        'Davet yalnızca şoför hesabı (çalışan) kullanıcılarına gönderilebilir',
+      );
+    }
+
+    const existing = await this.prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId: target.id,
+        status: {
+          in: [InvitationStatus.accepted, InvitationStatus.pending],
+        },
+      },
+    });
+    if (existing) {
+      throw new BadRequestException('Bu kullanıcı zaten işletmede veya bekleyen daveti var');
+    }
+
+    const pendingInvite = await this.prisma.organizationInvitation.findFirst({
+      where: {
+        organizationId,
+        targetUserId: target.id,
+        status: InvitationStatus.pending,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (pendingInvite) {
+      throw new BadRequestException('Bu kullanıcıya zaten bekleyen bir davet var');
     }
 
     const invitation = await this.prisma.organizationInvitation.create({
       data: {
         organizationId,
         invitedByUserId: userId,
-        inviteRole: OrganizationMemberRole.driver,
-        targetUserId,
-        targetPhone,
-        targetEmail: dto.targetEmail?.toLowerCase(),
+        inviteRole: dto.inviteRole,
+        targetUserId: target.id,
+        targetPhone: target.phone,
+        targetEmail: target.email?.toLowerCase(),
         message: dto.message,
         status: InvitationStatus.pending,
+      },
+      include: {
+        organization: { select: { displayName: true } },
       },
     });
 
@@ -106,8 +163,15 @@ export class OrganizationsService {
       invitation: {
         id: invitation.id,
         inviteCode: invitation.inviteCode,
+        inviteRole: invitation.inviteRole,
         status: invitation.status,
         expiresAt: invitation.expiresAt,
+        organizationName: invitation.organization.displayName,
+      },
+      targetUser: {
+        id: target.id,
+        firstName: target.firstName,
+        lastName: target.lastName,
       },
     };
   }
@@ -146,7 +210,9 @@ export class OrganizationsService {
     const members = await this.prisma.organizationMember.findMany({
       where: {
         organizationId,
-        memberRole: OrganizationMemberRole.driver,
+        memberRole: {
+          in: [OrganizationMemberRole.driver, OrganizationMemberRole.manager],
+        },
         status: InvitationStatus.accepted,
       },
       include: {
@@ -158,14 +224,22 @@ export class OrganizationsService {
     return {
       drivers: members
         .filter((m) => m.user.registrationType === RegistrationAccountType.driver)
-        .map((m) => this.formatDriver(m.user)),
+        .map((m) => ({
+          ...this.formatDriver(m.user),
+          memberRole: m.memberRole,
+        })),
     };
   }
 
   async getDriver(userId: string, organizationId: string, driverUserId: string) {
     await this.assertOrgManager(userId, organizationId);
     const member = await this.findOrgDriverMember(organizationId, driverUserId);
-    return { driver: this.formatDriver(member.user) };
+    return {
+      driver: {
+        ...this.formatDriver(member.user),
+        memberRole: member.memberRole,
+      },
+    };
   }
 
   async createDriver(
@@ -183,6 +257,7 @@ export class OrganizationsService {
     const passwordHash = await hashPin(dto.password);
 
     const driver = await this.prisma.$transaction(async (tx) => {
+      const memberCode = await this.nextMemberCode(tx);
       const created = await tx.user.create({
         data: {
           registrationType: RegistrationAccountType.driver,
@@ -194,6 +269,7 @@ export class OrganizationsService {
           gender: dto.gender,
           nationalId: dto.nationalId,
           profileImageUrl: dto.profileImageUrl,
+          memberCode,
         },
       });
 
@@ -319,6 +395,18 @@ export class OrganizationsService {
     return { success: true, organizationId };
   }
 
+  private async nextMemberCode(tx: Prisma.TransactionClient): Promise<string> {
+    for (let i = 0; i < 25; i++) {
+      const memberCode = generateUserMemberCode();
+      const taken = await tx.user.findFirst({
+        where: { memberCode },
+        select: { id: true },
+      });
+      if (!taken) return memberCode;
+    }
+    throw new ConflictException('Üye kodu oluşturulamadı');
+  }
+
   private formatDriver(user: DriverUserWithProfile) {
     const dp = user.driverProfile;
     return {
@@ -342,18 +430,17 @@ export class OrganizationsService {
       where: {
         organizationId,
         userId: driverUserId,
-        memberRole: OrganizationMemberRole.driver,
+        memberRole: {
+          in: [OrganizationMemberRole.driver, OrganizationMemberRole.manager],
+        },
         status: InvitationStatus.accepted,
       },
       include: {
         user: { include: { driverProfile: true } },
       },
     });
-    if (
-      !member ||
-      member.user.registrationType !== RegistrationAccountType.driver
-    ) {
-      throw new NotFoundException('Şoför bulunamadı');
+    if (!member) {
+      throw new NotFoundException('Üye bulunamadı');
     }
     return member;
   }
@@ -370,6 +457,20 @@ export class OrganizationsService {
     });
     if (existing) {
       throw new ConflictException('Bu telefon veya e-posta zaten kayıtlı');
+    }
+  }
+
+  private async assertCanInviteMembers(userId: string, organizationId: string) {
+    await this.assertOrgManager(userId, organizationId);
+    const inviter = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (
+      !inviter ||
+      (inviter.registrationType !== RegistrationAccountType.sole_proprietor &&
+        inviter.registrationType !== RegistrationAccountType.company)
+    ) {
+      throw new ForbiddenException(
+        'Üye daveti yalnızca şahıs firması veya şirket hesabından gönderilebilir',
+      );
     }
   }
 

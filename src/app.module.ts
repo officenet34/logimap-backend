@@ -8,6 +8,7 @@ import { PushModule } from './push/push.module';
 import { VehiclesModule } from './vehicles/vehicles.module';
 import { MediaModule } from './media/media.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { UsersModule } from './users/users.module';
 import { RoutesModule } from './routes/routes.module';
 import { FreightShipmentsModule } from './freight-shipments/freight-shipments.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -19,6 +20,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     MediaModule,
     OrganizationsModule,
+    UsersModule,
     InvitationsModule,
     LocationsModule,
     PushModule,

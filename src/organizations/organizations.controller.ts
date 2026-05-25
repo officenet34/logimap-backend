@@ -4,6 +4,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { OrganizationsService } from './organizations.service';
 import { InviteDriverDto } from './dto/invite-driver.dto';
+import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
 
@@ -53,6 +54,15 @@ export class OrganizationsController {
     @Body() dto: UpdateOrgDriverDto,
   ) {
     return this.orgs.updateDriver(user.sub, id, driverUserId, dto);
+  }
+
+  @Post(':id/members/invite')
+  inviteMember(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: InviteMemberDto,
+  ) {
+    return this.orgs.inviteMember(user.sub, id, dto);
   }
 
   @Post(':id/invitations/driver')
