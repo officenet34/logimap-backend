@@ -21,10 +21,14 @@ import { InviteDriverDto } from './dto/invite-driver.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class OrganizationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async listMine(userId: string) {
     return this.prisma.organizationMember.findMany({
@@ -141,6 +145,13 @@ export class OrganizationsService {
       throw new BadRequestException('Bu kullanıcıya zaten bekleyen bir davet var');
     }
 
+    const inviter = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { firstName: true, lastName: true },
+    });
+    const inviterName =
+      `${inviter?.firstName ?? ''} ${inviter?.lastName ?? ''}`.trim();
+
     const invitation = await this.prisma.organizationInvitation.create({
       data: {
         organizationId,
@@ -156,6 +167,29 @@ export class OrganizationsService {
         organization: { select: { displayName: true } },
       },
     });
+
+    const orgName = invitation.organization.displayName;
+    const targetName = `${target.firstName} ${target.lastName}`.trim();
+    try {
+      await this.notifications.createOrgInviteForTarget({
+        targetUserId: target.id,
+        organizationId,
+        organizationName: orgName,
+        inviteCode: invitation.inviteCode,
+        inviteRole: invitation.inviteRole,
+        inviterName,
+        invitationId: invitation.id,
+      });
+      await this.notifications.createOrgInviteSentForInviter({
+        inviterUserId: userId,
+        targetName,
+        organizationName: orgName,
+        inviteRole: invitation.inviteRole,
+        invitationId: invitation.id,
+      });
+    } catch {
+      /* bildirim tablosu henüz migrate edilmemiş olabilir */
+    }
 
     return {
       success: true,

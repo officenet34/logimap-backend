@@ -4,17 +4,18 @@
 
 set -e
 
-MIGRATION_FILE="prisma/migrations/20260522140000_user_member_org_codes/migration.sql"
-
-if [ -f "$MIGRATION_FILE" ] && [ -n "$DATABASE_URL" ]; then
-  echo "[entrypoint] member_code / org_code SQL uygulanıyor (idempotent)..."
-  if npx prisma db execute --file "$MIGRATION_FILE" --schema prisma/schema.prisma; then
-    echo "[entrypoint] SQL tamamlandı."
-  else
-    echo "[entrypoint] UYARI: SQL uygulanamadı (API yine de başlatılıyor). Coolify Postgres'te 002_user_member_code.sql çalıştırın."
+for MIGRATION_FILE in \
+  prisma/migrations/20260522140000_user_member_org_codes/migration.sql \
+  prisma/migrations/20260522150000_org_invite_notifications/migration.sql
+do
+  if [ -f "$MIGRATION_FILE" ] && [ -n "$DATABASE_URL" ]; then
+    echo "[entrypoint] SQL uygulanıyor: $MIGRATION_FILE"
+    if npx prisma db execute --file "$MIGRATION_FILE" --schema prisma/schema.prisma; then
+      echo "[entrypoint] Tamam: $MIGRATION_FILE"
+    else
+      echo "[entrypoint] UYARI: $MIGRATION_FILE uygulanamadı (API yine başlatılıyor)."
+    fi
   fi
-else
-  echo "[entrypoint] SQL atlandı (dosya veya DATABASE_URL yok)."
-fi
+done
 
 exec node dist/main.js

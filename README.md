@@ -16,11 +16,12 @@ Production DB zaten dolu olduğu için **`prisma migrate deploy` kullanılmaz** 
 
 Container açılışında `scripts/docker-entrypoint.sh` şunu çalıştırır:
 
-`npx prisma db execute --file prisma/migrations/20260522140000_user_member_org_codes/migration.sql`
+Entrypoint sırayla çalıştırır:
 
-(idempotent; `002_user_member_code.sql` ile aynı içerik)
+- `prisma/migrations/20260522140000_user_member_org_codes/migration.sql` (`002_user_member_code.sql`)
+- `prisma/migrations/20260522150000_org_invite_notifications/migration.sql` (`003_org_invite_notifications.sql` — Personel rolü CHECK + `app_notifications`)
 
-Manuel yedek: Coolify Postgres → `database/logimap/002_user_member_code.sql` bir kez çalıştırın.
+Manuel yedek: Coolify Postgres → `database/logimap/002_*.sql` ve `003_org_invite_notifications.sql` bir kez çalıştırın.
 
 ### Environment
 
@@ -56,8 +57,12 @@ Manuel yedek: Coolify Postgres → `database/logimap/002_user_member_code.sql` b
 | GET | `/v1/auth/me` |
 | GET | `/v1/organizations` |
 | GET | `/v1/organizations/:id/drivers/locations` |
+| POST | `/v1/organizations/:id/members/invite` |
 | POST | `/v1/organizations/:id/invitations/driver` |
 | POST | `/v1/organizations/:id/members/self-driver` |
 | GET | `/v1/invitations/pending` |
 | POST | `/v1/invitations/:code/accept` |
+| POST | `/v1/invitations/:code/reject` |
+| GET | `/v1/notifications` |
+| PATCH | `/v1/notifications/:id/read` |
 | POST | `/v1/locations` |

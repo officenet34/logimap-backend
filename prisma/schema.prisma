@@ -90,6 +90,7 @@ model User {
   organizationMembers      OrganizationMember[]
   invitationsSent          OrganizationInvitation[] @relation("InvitationInviter")
   invitationsReceived      OrganizationInvitation[] @relation("InvitationTarget")
+  appNotifications         AppNotification[]
   sessions                 UserSession[]
   activeOrganization       UserActiveOrganization?
   driverLocations          DriverLocation[]
@@ -314,6 +315,23 @@ model OrganizationInvitation {
 
   @@index([organizationId, status], map: "idx_org_invitations_org_status")
   @@map("organization_invitations")
+}
+
+/// LogiMap VDS in-app bildirimler (Family247 notifications karşılığı)
+model AppNotification {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String
+  title     String
+  message   String?
+  data      Json     @default("{}")
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_app_notifications_user_created")
+  @@map("app_notifications")
 }
 
 model UserSession {

@@ -11,10 +11,14 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizePhone } from '../common/utils/phone.util';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class InvitationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async listPending(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -114,6 +118,22 @@ export class InvitationsService {
         },
       });
     });
+
+    const org = await this.prisma.organization.findUnique({
+      where: { id: invitation.organizationId },
+      select: { displayName: true },
+    });
+    const accepterName = `${user.firstName} ${user.lastName}`.trim();
+    try {
+      await this.notifications.createOrgInviteAcceptedForInviter({
+        inviterUserId: invitation.invitedByUserId,
+        accepterName,
+        organizationName: org?.displayName ?? 'İşletme',
+        invitationId: invitation.id,
+      });
+    } catch {
+      /* app_notifications tablosu yoksa API yine başarılı */
+    }
 
     return { success: true, organizationId: invitation.organizationId };
   }
