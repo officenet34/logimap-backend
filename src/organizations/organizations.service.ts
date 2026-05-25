@@ -319,8 +319,8 @@ export class OrganizationsService {
       id: string;
       firstName: string;
       lastName: string;
-      email: string;
-      phone: string;
+      email: string | null;
+      phone: string | null;
       profileImageUrl: string | null;
       gender: string;
       nationalId: string | null;
