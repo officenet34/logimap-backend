@@ -716,6 +716,28 @@ export class AuthService {
     const memberOrg = user.organizationMembers[0]?.organization;
     const org = activeOrg ?? memberOrg;
 
+    let orgMemberRole: OrganizationMemberRole | null = null;
+    if (org?.id) {
+      const memberships = await this.prisma.organizationMember.findMany({
+        where: {
+          userId,
+          organizationId: org.id,
+          status: InvitationStatus.accepted,
+        },
+        select: { memberRole: true },
+      });
+      const ownerMembership = memberships.find(
+        (m) => m.memberRole === OrganizationMemberRole.owner,
+      );
+      orgMemberRole =
+        ownerMembership?.memberRole ??
+        memberships.find((m) => m.memberRole === OrganizationMemberRole.manager)
+          ?.memberRole ??
+        memberships.find((m) => m.memberRole === OrganizationMemberRole.driver)
+          ?.memberRole ??
+        null;
+    }
+
     const city = user.driverProfile?.city ?? org?.city ?? null;
     const district = user.driverProfile?.district ?? org?.district ?? null;
     const country = user.driverProfile?.country ?? org?.country ?? null;
