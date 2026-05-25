@@ -10,11 +10,17 @@ NestJS + Prisma + PostgreSQL (`logimap_db`)
 4. **Port**: `3000`
 5. **Health Check**: `GET /v1/health`
 
-### Veritabanı migration
+### Veritabanı (üye kodu / org kodu)
 
-Container her açılışta `npx prisma migrate deploy` çalıştırır (`Dockerfile` CMD). Üye kodu (`member_code`) ve işletme kodu (`org_code`) için migration: `prisma/migrations/20260522140000_user_member_org_codes/`.
+Production DB zaten dolu olduğu için **`prisma migrate deploy` kullanılmaz** (P3005: schema not empty).
 
-Manuel (bir kez): `database/logimap/002_user_member_code.sql` — Coolify Postgres’e bağlanıp çalıştırılabilir (idempotent).
+Container açılışında `scripts/docker-entrypoint.sh` şunu çalıştırır:
+
+`npx prisma db execute --file prisma/migrations/20260522140000_user_member_org_codes/migration.sql`
+
+(idempotent; `002_user_member_code.sql` ile aynı içerik)
+
+Manuel yedek: Coolify Postgres → `database/logimap/002_user_member_code.sql` bir kez çalıştırın.
 
 ### Environment
 

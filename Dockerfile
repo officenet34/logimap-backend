@@ -32,8 +32,13 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./
 COPY --from=build /app/prisma ./prisma
+COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
+
+# Container açılışında idempotent SQL (prisma db execute); migrate deploy P3005 vermez
+RUN npm install prisma@^6.0.0 --no-save \
+  && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/v1/health || exit 1
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/main.js"]
+CMD ["/app/docker-entrypoint.sh"]
