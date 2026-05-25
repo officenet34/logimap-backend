@@ -7,6 +7,7 @@ import { InviteDriverDto } from './dto/invite-driver.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 
 @Controller('organizations')
 @UseGuards(JwtAuthGuard)
@@ -16,6 +17,20 @@ export class OrganizationsController {
   @Get()
   listMine(@CurrentUser() user: JwtPayload) {
     return this.orgs.listMine(user.sub);
+  }
+
+  @Get(':id')
+  getOrganization(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.orgs.getOrganization(user.sub, id);
+  }
+
+  @Patch(':id')
+  updateOrganization(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: UpdateOrganizationDto,
+  ) {
+    return this.orgs.updateOrganization(user.sub, id, dto);
   }
 
   @Get(':id/drivers/locations')

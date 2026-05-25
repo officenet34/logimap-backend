@@ -61,4 +61,8 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsArray()
   sectors?: (SectorCode | 'all')[];
+
+  @IsOptional()
+  @IsString()
+  logoUrl?: string;
 }

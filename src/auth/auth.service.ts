@@ -503,7 +503,8 @@ export class AuthService {
       (addressPatch ||
         dto.businessName != null ||
         dto.taxOffice != null ||
-        dto.sectors != null);
+        dto.sectors != null ||
+        dto.logoUrl != null);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: userId }, data });
@@ -551,6 +552,9 @@ export class AuthService {
         }
         if (dto.taxOffice != null) {
           orgData.taxOffice = dto.taxOffice.trim();
+        }
+        if (dto.logoUrl != null) {
+          orgData.logoUrl = dto.logoUrl.trim() || null;
         }
         if (dto.city != null) orgData.city = dto.city.trim();
         if (dto.district != null) orgData.district = dto.district.trim();
@@ -758,6 +762,7 @@ export class AuthService {
       profileAddressLine: addressLine,
       profileOrganizationName: org?.displayName ?? null,
       profileOrganizationId: org?.id ?? null,
+      profileOrganizationLogoUrl: org?.logoUrl ?? null,
       profileOrgCode: org?.orgCode ?? null,
       memberCode: user.memberCode,
       profileOrgMemberRole: orgMemberRole,

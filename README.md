@@ -56,6 +56,9 @@ Manuel yedek: Coolify Postgres → `database/logimap/002_*.sql` ve `003_org_invi
 | POST | `/v1/auth/logout` |
 | GET | `/v1/auth/me` |
 | GET | `/v1/organizations` |
+| GET | `/v1/organizations/:id` |
+| PATCH | `/v1/organizations/:id` |
+| POST | `/v1/media/me/org-logo` |
 | GET | `/v1/organizations/:id/drivers/locations` |
 | POST | `/v1/organizations/:id/members/invite` |
 | POST | `/v1/organizations/:id/invitations/driver` |

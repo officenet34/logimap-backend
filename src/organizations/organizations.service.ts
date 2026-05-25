@@ -21,7 +21,13 @@ import { InviteDriverDto } from './dto/invite-driver.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
+import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  formatSectorLabels,
+  formatSectorLines,
+  resolveSectors,
+} from '../common/utils/sectors.util';
 
 @Injectable()
 export class OrganizationsService {
@@ -29,6 +35,100 @@ export class OrganizationsService {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
   ) {}
+
+  async getOrganization(userId: string, organizationId: string) {
+    await this.assertOrgMember(userId, organizationId);
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      include: { sectors: { select: { sector: true } } },
+    });
+    if (!org) throw new NotFoundException('İşletme bulunamadı');
+
+    const membership = await this.prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId,
+        status: InvitationStatus.accepted,
+      },
+      select: { memberRole: true },
+    });
+
+    const sectorCodes = org.sectors.map((s) => s.sector);
+    return {
+      organization: {
+        id: org.id,
+        displayName: org.displayName,
+        orgType: org.orgType,
+        orgCode: org.orgCode,
+        logoUrl: org.logoUrl,
+        taxOffice: org.taxOffice,
+        city: org.city,
+        district: org.district,
+        country: org.country,
+        addressLine: org.addressLine,
+        mobilePhone: org.mobilePhone,
+        sectorCodes,
+        sectorLabel: formatSectorLabels(sectorCodes),
+        sectorLines: formatSectorLines(sectorCodes),
+        locationLabel:
+          org.city && org.district
+            ? `${org.district}/${org.city.toLocaleUpperCase('tr-TR')}`
+            : null,
+      },
+      memberRole: membership?.memberRole ?? null,
+      canEdit: membership?.memberRole === OrganizationMemberRole.owner,
+    };
+  }
+
+  async updateOrganization(
+    userId: string,
+    organizationId: string,
+    dto: UpdateOrganizationDto,
+  ) {
+    await this.assertOrgOwner(userId, organizationId);
+
+    const orgData: Prisma.OrganizationUpdateInput = {};
+    if (dto.displayName != null) orgData.displayName = dto.displayName.trim();
+    if (dto.logoUrl != null) orgData.logoUrl = dto.logoUrl.trim() || null;
+    if (dto.taxOffice != null) orgData.taxOffice = dto.taxOffice.trim();
+    if (dto.city != null) orgData.city = dto.city.trim();
+    if (dto.district != null) orgData.district = dto.district.trim();
+    if (dto.country != null) orgData.country = dto.country.trim();
+    if (dto.addressLine != null) orgData.addressLine = dto.addressLine.trim();
+
+    await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(orgData).length > 0) {
+        await tx.organization.update({
+          where: { id: organizationId },
+          data: orgData,
+        });
+      }
+      if (dto.sectors != null) {
+        const sectors = resolveSectors(dto.sectors);
+        await tx.organizationSector.deleteMany({
+          where: { organizationId },
+        });
+        await tx.organizationSector.createMany({
+          data: sectors.map((sector) => ({ organizationId, sector })),
+        });
+      }
+    });
+
+    return this.getOrganization(userId, organizationId);
+  }
+
+  async setOrganizationLogo(
+    userId: string,
+    organizationId: string,
+    logoUrl: string,
+  ) {
+    await this.assertOrgOwner(userId, organizationId);
+    await this.prisma.organization.update({
+      where: { id: organizationId },
+      data: { logoUrl },
+    });
+    return { success: true, logoUrl };
+  }
 
   async listMine(userId: string) {
     return this.prisma.organizationMember.findMany({
@@ -513,6 +613,38 @@ export class OrganizationsService {
     ) {
       throw new ForbiddenException(
         'Personel daveti yalnızca şahıs firması veya şirket hesabından gönderilebilir',
+      );
+    }
+  }
+
+  private async assertOrgMember(userId: string, organizationId: string) {
+    const member = await this.prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId,
+        status: InvitationStatus.accepted,
+      },
+    });
+    if (!member) {
+      throw new ForbiddenException('Bu işletmeye erişiminiz yok');
+    }
+    return member;
+  }
+
+  private async assertOrgOwner(userId: string, organizationId: string) {
+    const member = await this.assertOrgMember(userId, organizationId);
+    if (member.memberRole !== OrganizationMemberRole.owner) {
+      throw new ForbiddenException(
+        'Firma bilgilerini yalnızca işletme yöneticisi düzenleyebilir',
+      );
+    }
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { createdByUserId: true },
+    });
+    if (!org || org.createdByUserId !== userId) {
+      throw new ForbiddenException(
+        'Firma bilgilerini yalnızca işletmeyi kuran yönetici düzenleyebilir',
       );
     }
   }
