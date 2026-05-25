@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import {
   InvitationStatus,
@@ -9,8 +11,11 @@ import {
   RegistrationAccountType,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { normalizePhone } from '../common/utils/phone.util';
+import { hashPin } from '../common/utils/password.util';
+import { normalizePhone, isValidE164 } from '../common/utils/phone.util';
 import { InviteDriverDto } from './dto/invite-driver.dto';
+import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
+import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
 
 @Injectable()
 export class OrganizationsService {
@@ -130,6 +135,166 @@ export class OrganizationsService {
     return { success: true };
   }
 
+  async listDrivers(userId: string, organizationId: string) {
+    await this.assertOrgManager(userId, organizationId);
+
+    const members = await this.prisma.organizationMember.findMany({
+      where: {
+        organizationId,
+        memberRole: OrganizationMemberRole.driver,
+        status: InvitationStatus.accepted,
+      },
+      include: {
+        user: { include: { driverProfile: true } },
+      },
+      orderBy: [{ joinedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return {
+      drivers: members
+        .filter((m) => m.user.registrationType === RegistrationAccountType.driver)
+        .map((m) => this.formatDriver(m.user)),
+    };
+  }
+
+  async getDriver(userId: string, organizationId: string, driverUserId: string) {
+    await this.assertOrgManager(userId, organizationId);
+    const member = await this.findOrgDriverMember(organizationId, driverUserId);
+    return { driver: this.formatDriver(member.user) };
+  }
+
+  async createDriver(
+    userId: string,
+    organizationId: string,
+    dto: CreateOrgDriverDto,
+  ) {
+    await this.assertOrgManager(userId, organizationId);
+    this.assertPasswordMatch(dto.password, dto.passwordConfirm);
+
+    const phone = normalizePhone(dto.phone);
+    if (!isValidE164(phone)) throw new BadRequestException('Geçersiz telefon');
+    await this.assertUniqueUser(phone, dto.email);
+
+    const passwordHash = await hashPin(dto.password);
+
+    const driver = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          registrationType: RegistrationAccountType.driver,
+          email: dto.email.toLowerCase(),
+          phone,
+          passwordHash,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          gender: dto.gender,
+          nationalId: dto.nationalId,
+          profileImageUrl: dto.profileImageUrl,
+        },
+      });
+
+      await tx.driverProfile.create({
+        data: {
+          userId: created.id,
+          city: dto.city,
+          district: dto.district,
+          country: dto.country ?? 'Türkiye',
+          addressLine: dto.addressLine,
+        },
+      });
+
+      await tx.organizationMember.create({
+        data: {
+          organizationId,
+          userId: created.id,
+          memberRole: OrganizationMemberRole.driver,
+          status: InvitationStatus.accepted,
+          joinedAt: new Date(),
+        },
+      });
+
+      return tx.user.findUniqueOrThrow({
+        where: { id: created.id },
+        include: { driverProfile: true },
+      });
+    });
+
+    return { driver: this.formatDriver(driver) };
+  }
+
+  async updateDriver(
+    userId: string,
+    organizationId: string,
+    driverUserId: string,
+    dto: UpdateOrgDriverDto,
+  ) {
+    await this.assertOrgManager(userId, organizationId);
+    const member = await this.findOrgDriverMember(organizationId, driverUserId);
+    const target = member.user;
+
+    let phone: string | undefined;
+    if (dto.phone != null) {
+      phone = normalizePhone(dto.phone);
+      if (!isValidE164(phone)) throw new BadRequestException('Geçersiz telefon');
+      const clash = await this.prisma.user.findFirst({
+        where: { phone, NOT: { id: target.id } },
+      });
+      if (clash) throw new ConflictException('Bu telefon başka bir hesapta kayıtlı');
+    }
+
+    if (dto.email != null) {
+      const email = dto.email.toLowerCase();
+      const clash = await this.prisma.user.findFirst({
+        where: { email, NOT: { id: target.id } },
+      });
+      if (clash) throw new ConflictException('Bu e-posta başka bir hesapta kayıtlı');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: target.id },
+        data: {
+          ...(dto.firstName != null ? { firstName: dto.firstName } : {}),
+          ...(dto.lastName != null ? { lastName: dto.lastName } : {}),
+          ...(dto.email != null ? { email: dto.email.toLowerCase() } : {}),
+          ...(phone != null ? { phone } : {}),
+          ...(dto.profileImageUrl !== undefined
+            ? { profileImageUrl: dto.profileImageUrl }
+            : {}),
+          ...(dto.gender != null ? { gender: dto.gender } : {}),
+          ...(dto.nationalId != null ? { nationalId: dto.nationalId } : {}),
+        },
+      });
+
+      const profileData = {
+        ...(dto.city != null ? { city: dto.city } : {}),
+        ...(dto.district != null ? { district: dto.district } : {}),
+        ...(dto.country != null ? { country: dto.country } : {}),
+        ...(dto.addressLine != null ? { addressLine: dto.addressLine } : {}),
+      };
+
+      if (Object.keys(profileData).length > 0) {
+        await tx.driverProfile.upsert({
+          where: { userId: target.id },
+          create: {
+            userId: target.id,
+            city: dto.city ?? '',
+            district: dto.district ?? '',
+            country: dto.country ?? 'Türkiye',
+            addressLine: dto.addressLine ?? '',
+          },
+          update: profileData,
+        });
+      }
+
+      return tx.user.findUniqueOrThrow({
+        where: { id: target.id },
+        include: { driverProfile: true },
+      });
+    });
+
+    return { driver: this.formatDriver(updated) };
+  }
+
   async setActiveOrganization(userId: string, organizationId: string) {
     const member = await this.prisma.organizationMember.findFirst({
       where: {
@@ -147,6 +312,77 @@ export class OrganizationsService {
     });
 
     return { success: true, organizationId };
+  }
+
+  private formatDriver(
+    user: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      profileImageUrl: string | null;
+      gender: string;
+      nationalId: string | null;
+      driverProfile: {
+        city: string;
+        district: string;
+        country: string;
+        addressLine: string;
+      } | null;
+    },
+  ) {
+    const dp = user.driverProfile;
+    return {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+      profileImageUrl: user.profileImageUrl,
+      gender: user.gender,
+      nationalId: user.nationalId,
+      city: dp?.city ?? null,
+      district: dp?.district ?? null,
+      country: dp?.country ?? null,
+      addressLine: dp?.addressLine ?? null,
+    };
+  }
+
+  private async findOrgDriverMember(organizationId: string, driverUserId: string) {
+    const member = await this.prisma.organizationMember.findFirst({
+      where: {
+        organizationId,
+        userId: driverUserId,
+        memberRole: OrganizationMemberRole.driver,
+        status: InvitationStatus.accepted,
+      },
+      include: {
+        user: { include: { driverProfile: true } },
+      },
+    });
+    if (
+      !member ||
+      member.user.registrationType !== RegistrationAccountType.driver
+    ) {
+      throw new NotFoundException('Şoför bulunamadı');
+    }
+    return member;
+  }
+
+  private assertPasswordMatch(a: string, b: string) {
+    if (a !== b) throw new BadRequestException('Şifreler eşleşmiyor');
+  }
+
+  private async assertUniqueUser(phone: string, email: string) {
+    const existing = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ phone }, { email: email.toLowerCase() }],
+      },
+    });
+    if (existing) {
+      throw new ConflictException('Bu telefon veya e-posta zaten kayıtlı');
+    }
   }
 
   private async assertOrgManager(userId: string, organizationId: string) {

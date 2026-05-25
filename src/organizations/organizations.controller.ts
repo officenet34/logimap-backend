@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { OrganizationsService } from './organizations.service';
 import { InviteDriverDto } from './dto/invite-driver.dto';
+import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
+import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
 
 @Controller('organizations')
 @UseGuards(JwtAuthGuard)
@@ -18,6 +20,39 @@ export class OrganizationsController {
   @Get(':id/drivers/locations')
   driverLocations(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
     return this.orgs.getDriversOnMap(user.sub, id);
+  }
+
+  @Get(':id/drivers')
+  listDrivers(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.orgs.listDrivers(user.sub, id);
+  }
+
+  @Post(':id/drivers')
+  createDriver(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: CreateOrgDriverDto,
+  ) {
+    return this.orgs.createDriver(user.sub, id, dto);
+  }
+
+  @Get(':id/drivers/:driverUserId')
+  getDriver(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('driverUserId') driverUserId: string,
+  ) {
+    return this.orgs.getDriver(user.sub, id, driverUserId);
+  }
+
+  @Patch(':id/drivers/:driverUserId')
+  updateDriver(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Param('driverUserId') driverUserId: string,
+    @Body() dto: UpdateOrgDriverDto,
+  ) {
+    return this.orgs.updateDriver(user.sub, id, driverUserId, dto);
   }
 
   @Post(':id/invitations/driver')
