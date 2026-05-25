@@ -71,7 +71,6 @@ export class OrganizationsService {
         district: org.district,
         country: org.country,
         addressLine: org.addressLine,
-        mobilePhone: org.mobilePhone,
         sectorCodes,
         sectorLabel: formatSectorLabels(sectorCodes),
         sectorLines: formatSectorLines(sectorCodes),
