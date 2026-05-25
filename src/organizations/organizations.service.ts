@@ -8,8 +8,13 @@ import {
 import {
   InvitationStatus,
   OrganizationMemberRole,
+  Prisma,
   RegistrationAccountType,
 } from '@prisma/client';
+
+type DriverUserWithProfile = Prisma.UserGetPayload<{
+  include: { driverProfile: true };
+}>;
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../common/utils/password.util';
 import { normalizePhone, isValidE164 } from '../common/utils/phone.util';
@@ -314,24 +319,7 @@ export class OrganizationsService {
     return { success: true, organizationId };
   }
 
-  private formatDriver(
-    user: {
-      id: string;
-      firstName: string;
-      lastName: string;
-      email: string | null;
-      phone: string | null;
-      profileImageUrl: string | null;
-      gender: string;
-      nationalId: string | null;
-      driverProfile: {
-        city: string;
-        district: string;
-        country: string;
-        addressLine: string;
-      } | null;
-    },
-  ) {
+  private formatDriver(user: DriverUserWithProfile) {
     const dp = user.driverProfile;
     return {
       id: user.id,
