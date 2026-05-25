@@ -36,4 +36,4 @@ COPY --from=build /app/prisma ./prisma
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/v1/health || exit 1
-CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && exec node dist/main.js"]

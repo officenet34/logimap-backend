@@ -16,7 +16,6 @@ type DriverUserWithProfile = Prisma.UserGetPayload<{
 }>;
 import { PrismaService } from '../prisma/prisma.service';
 import { hashPin } from '../common/utils/password.util';
-import { generateUserMemberCode } from '../common/utils/member-code.util';
 import { normalizePhone, isValidE164 } from '../common/utils/phone.util';
 import { InviteDriverDto } from './dto/invite-driver.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
@@ -257,7 +256,6 @@ export class OrganizationsService {
     const passwordHash = await hashPin(dto.password);
 
     const driver = await this.prisma.$transaction(async (tx) => {
-      const memberCode = await this.nextMemberCode(tx);
       const created = await tx.user.create({
         data: {
           registrationType: RegistrationAccountType.driver,
@@ -269,7 +267,6 @@ export class OrganizationsService {
           gender: dto.gender,
           nationalId: dto.nationalId,
           profileImageUrl: dto.profileImageUrl,
-          memberCode,
         },
       });
 
@@ -393,18 +390,6 @@ export class OrganizationsService {
     });
 
     return { success: true, organizationId };
-  }
-
-  private async nextMemberCode(tx: Prisma.TransactionClient): Promise<string> {
-    for (let i = 0; i < 25; i++) {
-      const memberCode = generateUserMemberCode();
-      const taken = await tx.user.findFirst({
-        where: { memberCode },
-        select: { id: true },
-      });
-      if (!taken) return memberCode;
-    }
-    throw new ConflictException('Üye kodu oluşturulamadı');
   }
 
   private formatDriver(user: DriverUserWithProfile) {

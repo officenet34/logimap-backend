@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { Response } from 'express';
 
 function toErrorMessage(value: string | string[] | undefined, fallback: string): string {
@@ -33,11 +34,24 @@ export class GlobalExceptionFilter implements ExceptionFilter {
         const payload = body as { message?: string | string[] };
         message = toErrorMessage(payload.message, message);
       }
+    } else if (exception instanceof PrismaClientKnownRequestError) {
+      this.logger.error(exception.message, exception.stack);
+      if (exception.code === 'P2002') {
+        status = HttpStatus.CONFLICT;
+        message = 'Bu kayıt zaten mevcut (e-posta, telefon veya vergi no)';
+      }
     } else if (exception instanceof Error) {
       this.logger.error(exception.message, exception.stack);
       if (exception.message.includes('Unique constraint')) {
         status = HttpStatus.CONFLICT;
         message = 'Bu kayıt zaten mevcut (e-posta, telefon veya vergi no)';
+      } else if (
+        exception.message.includes('member_code') ||
+        exception.message.includes('org_code') ||
+        exception.message.includes('does not exist in the current database')
+      ) {
+        message =
+          'Kayıt şu an kullanılamıyor (sunucu veritabanı güncellemesi gerekli). Lütfen destek ile iletişime geçin.';
       } else if (
         exception.message.includes('Geçersiz') ||
         exception.message.includes('Şifre') ||

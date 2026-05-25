@@ -18,10 +18,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { hashPin, verifyPin } from '../common/utils/password.util';
 import { normalizePhone, isValidE164, phoneLookupValues } from '../common/utils/phone.util';
 import {
-  generateOrgCode,
-  generateUserMemberCode,
-} from '../common/utils/member-code.util';
-import {
   formatSectorLabels,
   formatSectorLines,
   resolveSectors,
@@ -63,14 +59,12 @@ export class AuthService {
           gender: dto.gender,
           nationalId: dto.taxNumber,
           profileImageUrl: dto.profileImageUrl,
-          memberCode: await this.nextMemberCode(tx),
         },
       });
 
       const org = await tx.organization.create({
         data: {
           orgType: OrganizationType.sole_proprietor,
-          orgCode: await this.nextOrgCode(tx, OrganizationType.sole_proprietor),
           displayName: dto.businessName,
           taxOffice: dto.taxOffice,
           taxNumber: dto.taxNumber,
@@ -150,14 +144,12 @@ export class AuthService {
           gender: dto.gender,
           nationalId: dto.nationalId,
           profileImageUrl: dto.representativeProfileImageUrl,
-          memberCode: await this.nextMemberCode(tx),
         },
       });
 
       const org = await tx.organization.create({
         data: {
           orgType: OrganizationType.company,
-          orgCode: await this.nextOrgCode(tx, OrganizationType.company),
           displayName: dto.companyName,
           logoUrl: dto.logoUrl,
           taxOffice: dto.taxOffice,
@@ -237,7 +229,6 @@ export class AuthService {
           gender: dto.gender,
           nationalId: dto.nationalId,
           profileImageUrl: dto.profileImageUrl,
-          memberCode: await this.nextMemberCode(tx),
         },
       });
 
@@ -846,33 +837,6 @@ export class AuthService {
     if (existing) {
       throw new ConflictException('Bu telefon veya e-posta zaten kayıtlı');
     }
-  }
-
-  private async nextMemberCode(tx: Prisma.TransactionClient): Promise<string> {
-    for (let i = 0; i < 25; i++) {
-      const memberCode = generateUserMemberCode();
-      const taken = await tx.user.findFirst({
-        where: { memberCode },
-        select: { id: true },
-      });
-      if (!taken) return memberCode;
-    }
-    throw new ConflictException('Üye kodu oluşturulamadı');
-  }
-
-  private async nextOrgCode(
-    tx: Prisma.TransactionClient,
-    orgType: OrganizationType,
-  ): Promise<string> {
-    for (let i = 0; i < 25; i++) {
-      const orgCode = generateOrgCode(orgType);
-      const taken = await tx.organization.findFirst({
-        where: { orgCode },
-        select: { id: true },
-      });
-      if (!taken) return orgCode;
-    }
-    throw new ConflictException('İşletme kodu oluşturulamadı');
   }
 
   private async addSelfDriverTx(
