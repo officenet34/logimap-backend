@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   Put,
   UseGuards,
@@ -11,6 +12,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
+import { AssignDriverDto } from './dto/assign-driver.dto';
 import { UpsertVehicleDto } from './dto/upsert-vehicle.dto';
 import { VehiclesService } from './vehicles.service';
 
@@ -52,6 +54,20 @@ export class VehiclesController {
     @Body() dto: UpsertVehicleDto,
   ) {
     const vehicle = await this.vehicles.createMine(user.sub, dto);
+    return { vehicle };
+  }
+
+  @Patch('mine/:id/assign-driver')
+  async assignDriver(
+    @CurrentUser() user: JwtPayload,
+    @Param('id') id: string,
+    @Body() dto: AssignDriverDto,
+  ) {
+    const vehicle = await this.vehicles.assignDriver(
+      user.sub,
+      id,
+      dto.driverUserId ?? null,
+    );
     return { vehicle };
   }
 

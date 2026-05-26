@@ -488,20 +488,21 @@ export class AuthService {
       dto.country != null ||
       dto.addressLine != null;
 
-    const driverPatch =
-      existing.registrationType === RegistrationAccountType.driver &&
-      addressPatch;
-
     const organizationId =
       existing.activeOrganization?.organizationId ??
       existing.organizationMembers[0]?.organizationId;
+
+    const personalAddressPatch =
+      addressPatch &&
+      (existing.registrationType === RegistrationAccountType.driver ||
+        existing.registrationType === RegistrationAccountType.sole_proprietor ||
+        existing.registrationType === RegistrationAccountType.company);
 
     const orgPatch =
       organizationId != null &&
       (existing.registrationType === RegistrationAccountType.sole_proprietor ||
         existing.registrationType === RegistrationAccountType.company) &&
-      (addressPatch ||
-        dto.businessName != null ||
+      (dto.businessName != null ||
         dto.taxOffice != null ||
         dto.sectors != null ||
         dto.logoUrl != null);
@@ -509,7 +510,7 @@ export class AuthService {
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({ where: { id: userId }, data });
 
-      if (driverPatch) {
+      if (personalAddressPatch) {
         const profile = await tx.driverProfile.findUnique({
           where: { userId },
         });
@@ -556,16 +557,6 @@ export class AuthService {
         if (dto.logoUrl != null) {
           orgData.logoUrl = dto.logoUrl.trim() || null;
         }
-        if (dto.city != null) orgData.city = dto.city.trim();
-        if (dto.district != null) orgData.district = dto.district.trim();
-        if (dto.country != null) orgData.country = dto.country.trim();
-        if (dto.addressLine != null) {
-          orgData.addressLine = dto.addressLine.trim();
-        }
-        if (dto.phone != null) {
-          orgData.mobilePhone = normalizePhone(dto.phone);
-        }
-
         if (Object.keys(orgData).length > 0) {
           await tx.organization.update({
             where: { id: organizationId! },
@@ -674,7 +665,10 @@ export class AuthService {
                 displayName: true,
                 orgCode: true,
                 taxOffice: true,
+                taxNumber: true,
                 logoUrl: true,
+                mobilePhone: true,
+                landlinePhone: true,
                 city: true,
                 district: true,
                 country: true,
@@ -693,7 +687,10 @@ export class AuthService {
                 displayName: true,
                 orgCode: true,
                 taxOffice: true,
+                taxNumber: true,
                 logoUrl: true,
+                mobilePhone: true,
+                landlinePhone: true,
                 city: true,
                 district: true,
                 country: true,
@@ -749,9 +746,11 @@ export class AuthService {
       ),
     );
 
+    const orgCity = org?.city ?? null;
+    const orgDistrict = org?.district ?? null;
     const profileLocationLabel =
-      city && district
-        ? `${district}/${city.toLocaleUpperCase('tr-TR')}`
+      orgCity && orgDistrict
+        ? `${orgCity.toUpperCase()}/${orgDistrict}`
         : null;
 
     return {
@@ -763,6 +762,8 @@ export class AuthService {
       profileOrganizationName: org?.displayName ?? null,
       profileOrganizationId: org?.id ?? null,
       profileOrganizationLogoUrl: org?.logoUrl ?? null,
+      profileOrganizationMobilePhone: org?.mobilePhone ?? null,
+      profileOrganizationLandlinePhone: org?.landlinePhone ?? null,
       profileOrgCode: org?.orgCode ?? null,
       memberCode: user.memberCode,
       profileOrgMemberRole: orgMemberRole,

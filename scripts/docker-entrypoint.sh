@@ -6,7 +6,8 @@ set -e
 
 for MIGRATION_FILE in \
   prisma/migrations/20260522140000_user_member_org_codes/migration.sql \
-  prisma/migrations/20260522150000_org_invite_notifications/migration.sql
+  prisma/migrations/20260522150000_org_invite_notifications/migration.sql \
+  prisma/migrations/20260522160000_vehicle_assigned_driver/migration.sql
 do
   if [ -f "$MIGRATION_FILE" ] && [ -n "$DATABASE_URL" ]; then
     echo "[entrypoint] SQL uygulanıyor: $MIGRATION_FILE"

@@ -76,7 +76,7 @@ export class OrganizationsService {
         sectorLines: formatSectorLines(sectorCodes),
         locationLabel:
           org.city && org.district
-            ? `${org.district}/${org.city.toLocaleUpperCase('tr-TR')}`
+            ? `${org.city.toUpperCase()}/${org.district}`
             : null,
       },
       memberRole: membership?.memberRole ?? null,
@@ -356,9 +356,7 @@ export class OrganizationsService {
     const members = await this.prisma.organizationMember.findMany({
       where: {
         organizationId,
-        memberRole: {
-          in: [OrganizationMemberRole.driver, OrganizationMemberRole.manager],
-        },
+        memberRole: OrganizationMemberRole.driver,
         status: InvitationStatus.accepted,
       },
       include: {
@@ -368,12 +366,33 @@ export class OrganizationsService {
     });
 
     return {
-      drivers: members
-        .filter((m) => m.user.registrationType === RegistrationAccountType.driver)
-        .map((m) => ({
-          ...this.formatDriver(m.user),
-          memberRole: m.memberRole,
-        })),
+      drivers: members.map((m) => ({
+        ...this.formatDriver(m.user),
+        memberRole: m.memberRole,
+      })),
+    };
+  }
+
+  async listPersonnel(userId: string, organizationId: string) {
+    await this.assertCanInviteMembers(userId, organizationId);
+
+    const members = await this.prisma.organizationMember.findMany({
+      where: {
+        organizationId,
+        memberRole: OrganizationMemberRole.manager,
+        status: InvitationStatus.accepted,
+      },
+      include: {
+        user: { include: { driverProfile: true } },
+      },
+      orderBy: [{ joinedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return {
+      personnel: members.map((m) => ({
+        ...this.formatDriver(m.user),
+        memberRole: m.memberRole,
+      })),
     };
   }
 

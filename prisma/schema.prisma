@@ -98,6 +98,7 @@ model User {
   activityDocumentsUploaded ActivityDocument[]
   pushTokens               UserPushToken[]
   driverVehicles           DriverVehicle[]
+  assignedDriverVehicles   DriverVehicle[]      @relation("VehicleAssignedDriver")
   freightShipments         FreightShipment[]
   savedLocations           SavedLocation[]
 
@@ -139,12 +140,14 @@ model DriverVehicle {
   heightCm       String   @map("height_cm")
   bodyVolumeM3   String   @map("body_volume_m3")
   tonnageKg      String   @map("tonnage_kg")
-  extraInfo      String   @map("extra_info") @db.Text
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  extraInfo              String   @map("extra_info") @db.Text
+  assignedDriverUserId   String?  @map("assigned_driver_user_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  user   User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
-  images DriverVehicleImage[]
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedDriver User?                @relation("VehicleAssignedDriver", fields: [assignedDriverUserId], references: [id], onDelete: SetNull)
+  images         DriverVehicleImage[]
 
   @@index([userId], map: "idx_driver_vehicles_user_id_multi")
   @@map("driver_vehicles")

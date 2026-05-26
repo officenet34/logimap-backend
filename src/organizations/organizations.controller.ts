@@ -43,6 +43,11 @@ export class OrganizationsController {
     return this.orgs.listDrivers(user.sub, id);
   }
 
+  @Get(':id/personnel')
+  listPersonnel(@CurrentUser() user: JwtPayload, @Param('id') id: string) {
+    return this.orgs.listPersonnel(user.sub, id);
+  }
+
   @Post(':id/drivers')
   createDriver(
     @CurrentUser() user: JwtPayload,

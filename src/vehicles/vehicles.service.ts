@@ -1,14 +1,27 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InvitationStatus } from '@prisma/client';
+import {
+  InvitationStatus,
+  OrganizationMemberRole,
+} from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertVehicleDto } from './dto/upsert-vehicle.dto';
 
 const vehicleInclude = {
   images: { orderBy: { sortOrder: 'asc' as const } },
+  assignedDriver: {
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      profileImageUrl: true,
+      phone: true,
+    },
+  },
 } as const;
 
 @Injectable()
@@ -41,10 +54,28 @@ export class VehiclesService {
       thumbnailUrl: string;
       sortOrder: number;
     }[];
+    assignedDriverUserId: string | null;
+    assignedDriver: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      profileImageUrl: string | null;
+      phone: string;
+    } | null;
   }) {
     return {
       id: row.id,
       userId: row.userId,
+      assignedDriverUserId: row.assignedDriverUserId,
+      assignedDriver: row.assignedDriver
+        ? {
+            id: row.assignedDriver.id,
+            firstName: row.assignedDriver.firstName,
+            lastName: row.assignedDriver.lastName,
+            profileImageUrl: row.assignedDriver.profileImageUrl,
+            phone: row.assignedDriver.phone,
+          }
+        : null,
       vehicleBrand: row.vehicleBrand,
       vehicleModel: row.vehicleModel,
       makeModel: row.makeModel,
@@ -156,6 +187,51 @@ export class VehiclesService {
     });
     await this.persistImages(id, dto.images ?? []);
     return this.getMineById(userId, id);
+  }
+
+  async assignDriver(
+    ownerUserId: string,
+    vehicleId: string,
+    driverUserId: string | null,
+  ) {
+    const vehicle = await this.prisma.driverVehicle.findUnique({
+      where: { id: vehicleId },
+    });
+    if (!vehicle) throw new NotFoundException('Araç bulunamadı');
+    if (vehicle.userId !== ownerUserId) throw new ForbiddenException();
+
+    if (driverUserId) {
+      const ownerOrg = await this.prisma.organizationMember.findFirst({
+        where: {
+          userId: ownerUserId,
+          memberRole: OrganizationMemberRole.owner,
+          status: InvitationStatus.accepted,
+        },
+        select: { organizationId: true },
+      });
+      if (!ownerOrg) {
+        throw new ForbiddenException('İşletme yöneticisi değilsiniz');
+      }
+      const driverMember = await this.prisma.organizationMember.findFirst({
+        where: {
+          organizationId: ownerOrg.organizationId,
+          userId: driverUserId,
+          memberRole: OrganizationMemberRole.driver,
+          status: InvitationStatus.accepted,
+        },
+      });
+      if (!driverMember) {
+        throw new BadRequestException(
+          'Seçilen kullanıcı işletmenizde kayıtlı şoför değil',
+        );
+      }
+    }
+
+    await this.prisma.driverVehicle.update({
+      where: { id: vehicleId },
+      data: { assignedDriverUserId: driverUserId },
+    });
+    return this.getMineById(ownerUserId, vehicleId);
   }
 
   async deleteMine(userId: string, id: string) {
