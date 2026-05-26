@@ -365,10 +365,16 @@ export class OrganizationsService {
       orderBy: [{ joinedAt: 'desc' }, { createdAt: 'desc' }],
     });
 
+    const assignedByDriver = await this.loadAssignedVehiclesForDrivers(
+      organizationId,
+      members.map((m) => m.user.id),
+    );
+
     return {
       drivers: members.map((m) => ({
         ...this.formatDriver(m.user),
         memberRole: m.memberRole,
+        assignedVehicle: assignedByDriver.get(m.user.id) ?? null,
       })),
     };
   }
@@ -399,10 +405,15 @@ export class OrganizationsService {
   async getDriver(userId: string, organizationId: string, driverUserId: string) {
     await this.assertCanInviteMembers(userId, organizationId);
     const member = await this.findOrgDriverMember(organizationId, driverUserId);
+    const assignedByDriver = await this.loadAssignedVehiclesForDrivers(
+      organizationId,
+      [driverUserId],
+    );
     return {
       driver: {
         ...this.formatDriver(member.user),
         memberRole: member.memberRole,
+        assignedVehicle: assignedByDriver.get(driverUserId) ?? null,
       },
     };
   }
@@ -574,6 +585,48 @@ export class OrganizationsService {
       country: dp?.country ?? null,
       addressLine: dp?.addressLine ?? null,
     };
+  }
+
+  /** Şoföre atanmış araç (işletme sahibinin araçları). */
+  private async loadAssignedVehiclesForDrivers(
+    organizationId: string,
+    driverUserIds: string[],
+  ) {
+    const map = new Map<
+      string,
+      { id: string; plateVehicle: string; plateTrailer: string | null }
+    >();
+    if (driverUserIds.length === 0) return map;
+
+    const org = await this.prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { createdByUserId: true },
+    });
+    if (!org?.createdByUserId) return map;
+
+    const vehicles = await this.prisma.driverVehicle.findMany({
+      where: {
+        userId: org.createdByUserId,
+        assignedDriverUserId: { in: driverUserIds },
+      },
+      select: {
+        id: true,
+        plateVehicle: true,
+        plateTrailer: true,
+        assignedDriverUserId: true,
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    for (const v of vehicles) {
+      if (!v.assignedDriverUserId || map.has(v.assignedDriverUserId)) continue;
+      map.set(v.assignedDriverUserId, {
+        id: v.id,
+        plateVehicle: v.plateVehicle,
+        plateTrailer: v.plateTrailer,
+      });
+    }
+    return map;
   }
 
   private async findOrgDriverMember(organizationId: string, driverUserId: string) {
