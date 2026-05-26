@@ -7,22 +7,33 @@ export class NotificationsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listForUser(userId: string, limit = 50) {
-    const rows = await this.prisma.appNotification.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-    return {
-      notifications: rows.map((n) => ({
-        id: n.id,
-        type: n.type,
-        title: n.title,
-        message: n.message,
-        data: n.data,
-        isRead: n.isRead,
-        createdAt: n.createdAt,
-      })),
-    };
+    try {
+      const rows = await this.prisma.appNotification.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      });
+      return {
+        notifications: rows.map((n) => ({
+          id: n.id,
+          type: n.type,
+          title: n.title,
+          message: n.message,
+          data: n.data,
+          isRead: n.isRead,
+          createdAt: n.createdAt,
+        })),
+      };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      if (
+        msg.includes('app_notifications') &&
+        (msg.includes('does not exist') || msg.includes('P2021'))
+      ) {
+        return { notifications: [] };
+      }
+      throw error;
+    }
   }
 
   async markRead(userId: string, notificationId: string) {

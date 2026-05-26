@@ -35,6 +35,24 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
         sql: `CREATE INDEX IF NOT EXISTS idx_driver_vehicles_assigned_driver
           ON driver_vehicles (assigned_driver_user_id)`,
       },
+      {
+        name: 'public.app_notifications',
+        sql: `CREATE TABLE IF NOT EXISTS public.app_notifications (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+          type TEXT NOT NULL,
+          title TEXT NOT NULL,
+          message TEXT,
+          data JSONB NOT NULL DEFAULT '{}'::jsonb,
+          is_read BOOLEAN NOT NULL DEFAULT false,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`,
+      },
+      {
+        name: 'idx_app_notifications_user_created',
+        sql: `CREATE INDEX IF NOT EXISTS idx_app_notifications_user_created
+          ON public.app_notifications (user_id, created_at DESC)`,
+      },
     ];
 
     for (const patch of patches) {

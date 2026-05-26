@@ -22,7 +22,13 @@ async function bootstrap() {
   ensureUploadDirs();
   const uploadsRoot = getUploadsRoot();
   app.use('/uploads', express.static(uploadsRoot));
-  console.log(`LogiMap uploads: ${uploadsRoot} (UPLOAD_ROOT ile kalıcı volume bağlayın)`);
+  const publicBase =
+    process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
+    'https://api.logimap.com.tr';
+  console.log(`LogiMap uploads: ${uploadsRoot} (Coolify volume: UPLOAD_ROOT=/app/uploads)`);
+  console.log(
+    `LogiMap media: ${publicBase}/v1/media/asset/{avatars|vehicles|org-logos}/{dosya}`,
+  );
 
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(

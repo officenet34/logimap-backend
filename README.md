@@ -58,6 +58,13 @@ API dosyaları **`UPLOAD_ROOT`** (varsayılan `/app/uploads`) altına yazar. Yen
 
 Redeploy sonrası volume yoksa disk boşalır → **404**. Kayıp dosyalar için kullanıcılar resmi **yeniden yüklemeli**.
 
+Teşhis: `GET /v1/health/uploads` → `fileCounts` sıfırsa volume yok veya dosyalar silinmiş.
+
+**Veritabanı (süper kullanıcı ile bir kez):**
+
+- `database/logimap/003_org_invite_notifications.sql` → `app_notifications` tablosu
+- `database/logimap/004_vehicle_assigned_driver.sql` → `assigned_driver_user_id` (uygulama kullanıcısı owner değilse Prisma patch `42501` verir)
+
 **Traefik:** `/v1` API’ye gidiyorsa `/v1/media/asset/...` yeterli; `/uploads` ayrıca route etmek şart değil.
 
 ### Coolify domain (Traefik)
