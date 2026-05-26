@@ -3,38 +3,40 @@ import {
   Body,
   Controller,
   ForbiddenException,
+  Get,
+  Header,
+  NotFoundException,
+  Param,
   Post,
+  Res,
   UploadedFile,
   UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { FileFieldsInterceptor, FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import type { Request } from 'express';
 import { extname, join } from 'path';
 import { randomUUID } from 'crypto';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync } from 'fs';
+import {
+  ensureUploadDirs,
+  isAllowedUploadCategory,
+  publicAssetUrl,
+  uploadCategoryDir,
+} from '../config/uploads.config';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { JwtPayload } from '../auth/interfaces/jwt-payload.interface';
 import { OrganizationMemberRole, InvitationStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-const uploadDir = join(process.cwd(), 'uploads', 'avatars');
-if (!existsSync(uploadDir)) {
-  mkdirSync(uploadDir, { recursive: true });
-}
-
-const vehicleUploadDir = join(process.cwd(), 'uploads', 'vehicles');
-if (!existsSync(vehicleUploadDir)) {
-  mkdirSync(vehicleUploadDir, { recursive: true });
-}
-
-const orgLogoUploadDir = join(process.cwd(), 'uploads', 'org-logos');
-if (!existsSync(orgLogoUploadDir)) {
-  mkdirSync(orgLogoUploadDir, { recursive: true });
-}
+ensureUploadDirs();
+const uploadDir = uploadCategoryDir('avatars');
+const vehicleUploadDir = uploadCategoryDir('vehicles');
+const orgLogoUploadDir = uploadCategoryDir('org-logos');
 
 const IMAGE_EXTENSIONS = new Set([
   '.jpg',
@@ -146,6 +148,33 @@ function vehicleWithThumbInterceptor() {
 export class MediaController {
   constructor(private readonly prisma: PrismaService) {}
 
+  /** Herkese açık dosya sunumu — Coolify Traefik yalnızca /v1 route ediyorsa /uploads 404 olur. */
+  @Get('asset/:category/:filename')
+  @Header('Cache-Control', 'public, max-age=86400')
+  serveAsset(
+    @Param('category') category: string,
+    @Param('filename') filename: string,
+    @Res() res: Response,
+  ) {
+    if (!isAllowedUploadCategory(category)) {
+      throw new NotFoundException();
+    }
+    const safeName = decodeURIComponent(filename);
+    if (
+      !safeName ||
+      safeName.includes('..') ||
+      safeName.includes('/') ||
+      safeName.includes('\\')
+    ) {
+      throw new NotFoundException();
+    }
+    const filePath = join(uploadCategoryDir(category), safeName);
+    if (!existsSync(filePath)) {
+      throw new NotFoundException();
+    }
+    return res.sendFile(filePath);
+  }
+
   /** Kayıt öncesi (JWT yok) — yalnızca dosya yükler, URL döner */
   @Post('avatar')
   @UseInterceptors(avatarFileInterceptor())
@@ -217,10 +246,7 @@ export class MediaController {
     @Body('organizationId') organizationId?: string,
   ) {
     if (!file) throw new BadRequestException('Dosya gerekli');
-    const base =
-      process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
-      'https://api.logimap.com.tr';
-    const url = `${base}/uploads/org-logos/${file.filename}`;
+    const url = publicAssetUrl('org-logos', file.filename);
 
     const orgId = await this.resolveOwnerOrganizationId(
       user.sub,
@@ -297,12 +323,9 @@ export class MediaController {
     if (!file) {
       throw new BadRequestException('Dosya gerekli');
     }
-    const base =
-      process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
-      'https://api.logimap.com.tr';
-    const url = `${base}/uploads/avatars/${file.filename}`;
+    const url = publicAssetUrl('avatars', file.filename);
     const thumbnailUrl = thumbFile
-      ? `${base}/uploads/avatars/${thumbFile.filename}`
+      ? publicAssetUrl('avatars', thumbFile.filename)
       : url;
     return {
       url,
@@ -318,12 +341,9 @@ export class MediaController {
     if (!file) {
       throw new BadRequestException('Dosya gerekli');
     }
-    const base =
-      process.env.PUBLIC_API_URL?.replace(/\/$/, '') ??
-      'https://api.logimap.com.tr';
-    const url = `${base}/uploads/vehicles/${file.filename}`;
+    const url = publicAssetUrl('vehicles', file.filename);
     const thumbnailUrl = thumbFile
-      ? `${base}/uploads/vehicles/${thumbFile.filename}`
+      ? publicAssetUrl('vehicles', thumbFile.filename)
       : url;
     return {
       url,

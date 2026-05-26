@@ -1,10 +1,9 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { join } from 'path';
-import { existsSync, mkdirSync } from 'fs';
 import * as express from 'express';
 import { AppModule } from './app.module';
 import { validateEnv } from './config/validate-env';
+import { ensureUploadDirs, getUploadsRoot } from './config/uploads.config';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
@@ -20,11 +19,10 @@ async function bootstrap() {
 
   app.enableCors({ origin, credentials: true });
 
-  const uploadsRoot = join(process.cwd(), 'uploads');
-  if (!existsSync(uploadsRoot)) {
-    mkdirSync(uploadsRoot, { recursive: true });
-  }
+  ensureUploadDirs();
+  const uploadsRoot = getUploadsRoot();
   app.use('/uploads', express.static(uploadsRoot));
+  console.log(`LogiMap uploads: ${uploadsRoot} (UPLOAD_ROOT ile kalıcı volume bağlayın)`);
 
   app.useGlobalFilters(new GlobalExceptionFilter());
   app.useGlobalPipes(
