@@ -20,8 +20,11 @@ Entrypoint sırayla çalıştırır:
 
 - `prisma/migrations/20260522140000_user_member_org_codes/migration.sql` (`002_user_member_code.sql`)
 - `prisma/migrations/20260522150000_org_invite_notifications/migration.sql` (`003_org_invite_notifications.sql` — Personel rolü CHECK + `app_notifications`)
+- `prisma/migrations/20260522160000_vehicle_assigned_driver/migration.sql` (`004_vehicle_assigned_driver.sql` — araç şoför ataması)
 
-Manuel yedek: Coolify Postgres → `database/logimap/002_*.sql` ve `003_org_invite_notifications.sql` bir kez çalıştırın.
+Manuel yedek (Coolify Postgres → Query): `database/logimap/004_vehicle_assigned_driver.sql` — özellikle **Araçlar** sayfasında `assigned_driver_user_id does not exist` hatası görürseniz bir kez çalıştırın.
+
+API açılışında `PrismaService` aynı idempotent SQL’i de dener (entrypoint atlanmışsa).
 
 ### Environment
 
