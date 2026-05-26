@@ -39,6 +39,16 @@ API açılışında `PrismaService` aynı idempotent SQL’i de dener (entrypoin
 | `PUBLIC_API_URL` | `https://api.logimap.com.tr` (avatar/upload URL’leri) |
 | `PORT` | `3000` |
 
+### Yüklenen dosyalar (avatar, araç foto, firma logosu)
+
+API dosyaları container içinde `/app/uploads` altına yazar. **Coolify’da kalıcı volume bağlamazsanız** her redeploy’da dosyalar silinir; veritabanındaki URL’ler kalır ama `GET /uploads/...` **404** döner.
+
+**Çözüm:** Backend servisine volume mount: host veya named volume → container path **`/app/uploads`**.
+
+Örnek: `./data/logimap-uploads:/app/uploads`
+
+Dosyalar bir kez kaybolduysa kullanıcıların avatar / araç resmini yeniden yüklemesi gerekir.
+
 ### Coolify domain (Traefik)
 
 | Alt alan | Amaç |
