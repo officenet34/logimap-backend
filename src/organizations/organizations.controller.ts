@@ -8,6 +8,8 @@ import { InviteMemberDto } from './dto/invite-member.dto';
 import { CreateOrgDriverDto } from './dto/create-org-driver.dto';
 import { UpdateOrgDriverDto } from './dto/update-org-driver.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
+
+@Controller('organizations')
 @UseGuards(JwtAuthGuard)
 export class OrganizationsController {
   constructor(private readonly orgs: OrganizationsService) {}
