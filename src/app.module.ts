@@ -12,6 +12,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
 import { UsersModule } from './users/users.module';
 import { RoutesModule } from './routes/routes.module';
 import { FreightShipmentsModule } from './freight-shipments/freight-shipments.module';
+import { MapAlertsModule } from './map-alerts/map-alerts.module';
 import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
@@ -29,6 +30,7 @@ import { PrismaModule } from './prisma/prisma.module';
     VehiclesModule,
     RoutesModule,
     FreightShipmentsModule,
+    MapAlertsModule,
   ],
   controllers: [HealthController],
 })
